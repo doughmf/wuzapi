@@ -8,21 +8,7 @@ import (
 	"os"
 )
 
-// Estrutura para enviar mensagem ao Chatwoot (API de Relay)
-type ChatwootMessage struct {
-	Content     string `json:"content"`
-	MessageType string `json:"message_type"`
-	Private     bool   `json:"private"`
-	SourceID    string `json:"source_id"` // O número do telefone do cliente
-}
-
-// Estrutura para criar o contato se não existir
-type ChatwootContactPayload struct {
-	Name        string `json:"name"`
-	PhoneNumber string `json:"phone_number"`
-}
-
-func SendToChatwoot(pushName string, remoteJid string, text string) {
+func SendToChatwoot(pushName string, senderUser string, text string) {
 	cwURL := os.Getenv("CHATWOOT_URL")
 	cwToken := os.Getenv("CHATWOOT_TOKEN")
 	cwAccountID := os.Getenv("CHATWOOT_ACCOUNT_ID")
@@ -33,28 +19,29 @@ func SendToChatwoot(pushName string, remoteJid string, text string) {
 		return
 	}
 
-	// 1. Limpar o ID do WhatsApp (remover @s.whatsapp.net)
-	// Exemplo: 551199999999@s.whatsapp.net -> +551199999999
-	phoneNumber := "+" + remoteJid
-	if len(phoneNumber) > 15 {
-		phoneNumber = phoneNumber[:14] // Ajuste simples de formatação
-	}
-
-	// 2. Criar ou Buscar Contato no Chatwoot
-	// Nota: Para simplificar, vamos tentar enviar a mensagem direto para a API de conversas publicas
-	// Se você usar a API de Inbox, o fluxo é: Buscar Contato -> Criar Conversa -> Enviar Mensagem.
+	// 1. Formatar o número (Source ID)
+	// O whatsmeow entrega o user (ex: 551199999999). Adicionamos o + para o Chatwoot.
+	phoneNumber := "+" + senderUser
 	
-	// AQUI USAMOS A API SIMPLIFICADA DE "NEW CONVERSATION" DO CHATWOOT PARA API CHANNELS
-	url := fmt.Sprintf("%s/api/v1/accounts/%s/inboxes/%s/contacts", cwURL, cwAccountID, cwInboxID)
-	
-	// Payload para criar o contato/conversa
+	// 2. Montar o Payload Inteligente (Cria contato + Conversa + Mensagem tudo junto)
+	// Documentação: https://www.chatwoot.com/developers/api/#operation/newConversation
 	payload := map[string]interface{}{
-		"name":         pushName,
-		"phone_number": phoneNumber,
-		"source_id":    phoneNumber,
+		"source_id": phoneNumber,
+		"inbox_id":  cwInboxID,
+		"contact_identifier": phoneNumber,
+		"sender": map[string]string{
+			"name": pushName, // Atualiza o nome do contato se não existir
+		},
+		"message": map[string]string{
+			"content": text, // O conteúdo da mensagem
+		},
 	}
 	
 	jsonPayload, _ := json.Marshal(payload)
+	
+	// Rota mágica para criar conversa/mensagem em canais API
+	url := fmt.Sprintf("%s/api/v1/accounts/%s/conversations", cwURL, cwAccountID)
+
 	req, _ := http.NewRequest("POST", url, bytes.NewBuffer(jsonPayload))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("api_access_token", cwToken)
@@ -62,20 +49,14 @@ func SendToChatwoot(pushName string, remoteJid string, text string) {
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		fmt.Println("[Chatwoot] Erro ao criar contato:", err)
+		fmt.Println("[Chatwoot] Erro de conexão:", err)
 		return
 	}
 	defer resp.Body.Close()
 
-	// Ler o source_id retornado pelo Chatwoot para saber qual ID usar na mensagem
-	// (Esta parte requer parsing do JSON de resposta para ser perfeita, 
-	// mas para este exemplo simples, vamos assumir que o contato foi criado e enviar a mensagem)
-
-	// 3. Enviar a Mensagem
-	msgUrl := fmt.Sprintf("%s/api/v1/accounts/%s/conversations/%s/messages", cwURL, cwAccountID, phoneNumber) // Ajuste conforme a rota exata da sua versão
-	
-	// OBS: A rota exata do Chatwoot muda dependendo se é "API Channel" ou "Whatsapp Channel".
-	// Se for API Channel, você posta para /conversations/{conversation_id}/messages
-	
-	fmt.Printf("[Chatwoot] Enviando mensagem de %s: %s\n", pushName, text)
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		fmt.Printf("[Chatwoot] Mensagem enviada com sucesso: %s\n", text)
+	} else {
+		fmt.Printf("[Chatwoot] Erro API %d enviando mensagem.\n", resp.StatusCode)
+	}
 }

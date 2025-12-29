@@ -857,7 +857,7 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 
 			// Se tiver texto (ou descrição de mídia), envia para o Chatwoot
 			if cwText != "" {
-				go SendToChatwoot(evt.Info.PushName, evt.Info.RemoteJid.User, cwText)
+				go SendToChatwoot(evt.Info.PushName, evt.Info.Sender.User, cwText)
 			}
 		}
 		// --- FIM DA INTEGRAÇÃO CHATWOOT ---

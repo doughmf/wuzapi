@@ -835,6 +835,51 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 
 		log.Info().Str("id", evt.Info.ID).Str("source", evt.Info.SourceString()).Str("parts", strings.Join(metaParts, ", ")).Msg("Message Received")
 
+		// --- INÍCIO DA INTEGRAÇÃO CHATWOOT ---
+		// Verifica se a mensagem não é antiga (para evitar flood na inicialização)
+		isRecent := evt.Info.Timestamp.After(time.Now().Add(-5 * time.Minute))
+		
+		if isRecent && !evt.Info.IsFromMe {
+			// Tenta extrair o texto da mensagem
+			cwText := ""
+			if evt.Message.GetConversation() != "" {
+				cwText = evt.Message.GetConversation()
+			} else if evt.Message.GetExtendedTextMessage() != nil {
+				cwText = evt.Message.GetExtendedTextMessage().GetText()
+			} else {
+				// Se for mídia, coloca um texto descritivo
+				if evt.Message.GetImageMessage() != nil { cwText = "[Imagem]" }
+				if evt.Message.GetAudioMessage() != nil { cwText = "[Áudio]" }
+				if evt.Message.GetVideoMessage() != nil { cwText = "[Vídeo]" }
+				if evt.Message.GetDocumentMessage() != nil { cwText = "[Documento]" }
+				if evt.Message.GetStickerMessage() != nil { cwText = "[Sticker]" }
+			}
+
+			// Se tiver texto (ou descrição de mídia), envia para o Chatwoot
+			if cwText != "" {
+				go SendToChatwoot(evt.Info.PushName, evt.Info.RemoteJid.User, cwText)
+			}
+		}
+		// --- FIM DA INTEGRAÇÃO CHATWOOT ---
+
+		// Sincronizar mensagens enviadas pelo celular para o Chatwoot
+		if isRecent && evt.Info.IsFromMe {
+			cwText := ""
+			if evt.Message.GetConversation() != "" {
+				cwText = evt.Message.GetConversation()
+			} else if evt.Message.GetExtendedTextMessage() != nil {
+				cwText = evt.Message.GetExtendedTextMessage().GetText()
+			}
+			
+			if cwText != "" {
+				// AQUI precisaria de uma função diferente no chatwoot.go para "criar mensagem como usuário"
+				// Se usar a mesma função, vai aparecer como se o cliente tivesse enviado a mensagem.
+				// Por enquanto, vamos ignorar para não complicar, ou você pode descomentar abaixo:
+				
+				// go SendToChatwoot("Eu (Celular)", evt.Info.RemoteJid.User, cwText) 
+			}
+		}
+
 		if !*skipMedia {
 			// try to get Image if any
 			img := evt.Message.GetImageMessage()

@@ -150,3 +150,82 @@ func urlEncoded(str string) string {
 	// Substituição simples para URL encode do '+'
 	return strings.Replace(str, "+", "%2B", -1)
 }
+// --- ADICIONE ISTO NO FINAL DO ARQUIVO chatwoot.go ---
+
+// Estruturas para ler o Webhook do Chatwoot
+type CwWebhook struct {
+	Event       string `json:"event"`
+	MessageType string `json:"message_type"`
+	Content     string `json:"content"`
+	Conversation struct {
+		ContactInbox struct {
+			SourceID string `json:"source_id"` // Aqui está o número do telefone (+55...)
+		} `json:"contact_inbox"`
+	} `json:"conversation"`
+}
+
+// Handler para receber mensagens do Chatwoot
+func (s *server) HandleChatwootWebhook() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// 1. Validar Token do Wuzapi (passado na URL ?token=123...)
+		token := r.URL.Query().Get("token")
+		if token == "" {
+			http.Error(w, "Token obrigatório", http.StatusUnauthorized)
+			return
+		}
+
+		// 2. Ler o JSON do Chatwoot
+		var payload CwWebhook
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, "JSON inválido", http.StatusBadRequest)
+			return
+		}
+
+		// 3. Filtrar: Só queremos mensagens enviadas pelo Agente (outgoing)
+		// e que sejam do evento "message_created"
+		if payload.Event != "message_created" || payload.MessageType != "outgoing" {
+			w.WriteHeader(http.StatusOK) // Ignora silenciosamente
+			return
+		}
+
+		// 4. Encontrar a sessão do Wuzapi pelo Token
+		// (Lógica simplificada buscando o usuário no cache/banco)
+		userInfo, found := userinfocache.Get(token)
+		if !found {
+			fmt.Println("[ChatwootWebhook] Token inválido ou sessão não encontrada")
+			http.Error(w, "Sessão não encontrada", http.StatusUnauthorized)
+			return
+		}
+		
+		userID := userInfo.(Values).Get("Id")
+		client := clientManager.GetWhatsmeowClient(userID)
+		if client == nil || !client.IsConnected() {
+			fmt.Println("[ChatwootWebhook] WhatsApp desconectado")
+			http.Error(w, "WhatsApp desconectado", http.StatusInternalServerError)
+			return
+		}
+
+		// 5. Extrair o número e limpar (SourceID vem como +55...)
+		recipientPhone := payload.Conversation.ContactInbox.SourceID
+		// O Wuzapi precisa do JID (5511999...@s.whatsapp.net)
+		recipientJID, ok := parseJID(recipientPhone)
+		if !ok {
+			fmt.Printf("[ChatwootWebhook] Erro ao parsear número: %s\n", recipientPhone)
+			return
+		}
+
+		// 6. Enviar a mensagem no WhatsApp
+		fmt.Printf("[Chatwoot -> WhatsApp] Enviando para %s: %s\n", recipientPhone, payload.Content)
+		
+		// Envia texto simples
+		_, err := client.SendMessage(context.Background(), recipientJID, &waE2E.Message{
+			Conversation: proto.String(payload.Content),
+		})
+
+		if err != nil {
+			fmt.Printf("[ChatwootWebhook] Erro ao enviar: %v\n", err)
+		}
+
+		w.WriteHeader(http.StatusOK)
+	}
+}

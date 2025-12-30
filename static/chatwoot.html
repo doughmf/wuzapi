@@ -1,1 +1,222 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Configuração Chatwoot - WUZAPI</title>
+    <link rel="icon" href="/images/favicon.png">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+    
+    <style>
+        body { background-color: #f5f7fb; color: #333; font-family: 'Poppins', sans-serif; }
+        .config-section { padding: 4rem 1rem; min-height: 80vh; display: flex; align-items: center; justify-content: center; }
+        .config-card {
+            background: white;
+            padding: 2.5rem;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.05);
+            width: 100%;
+            max-width: 600px;
+        }
+        .config-header { text-align: center; margin-bottom: 2rem; }
+        .config-header h2 { color: #1a1a1a; font-size: 1.8rem; margin-bottom: 0.5rem; }
+        .config-header p { color: #666; font-size: 0.9rem; }
+        
+        .form-group { margin-bottom: 1.5rem; }
+        .form-group label { display: block; margin-bottom: 0.5rem; font-weight: 500; color: #444; }
+        .form-control {
+            width: 100%;
+            padding: 0.8rem 1rem;
+            border: 1px solid #e1e1e1;
+            border-radius: 8px;
+            font-family: 'Poppins', sans-serif;
+            transition: all 0.3s;
+            box-sizing: border-box;
+        }
+        .form-control:focus { border-color: #00E676; outline: none; box-shadow: 0 0 0 3px rgba(0, 230, 118, 0.1); }
+        .row { display: flex; gap: 1rem; }
+        .col { flex: 1; }
+        
+        .btn-save {
+            width: 100%;
+            background-color: #00E676;
+            color: white;
+            padding: 1rem;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s;
+            font-size: 1rem;
+        }
+        .btn-save:hover { background-color: #00c063; transform: translateY(-2px); }
+        
+        .admin-token-area {
+            background: #e8f5e9;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 2rem;
+            border: 1px solid #c8e6c9;
+        }
+        .status-msg { margin-top: 1rem; text-align: center; font-size: 0.9rem; min-height: 20px; font-weight: 500; }
+        .success { color: green; }
+        .error { color: red; }
+    </style>
+</head>
+<body>
 
+    <header>
+        <div class="header-container">
+            <div class="logo">
+                <img src="/images/favicon.png" alt="WUZAPI Logo">
+                <h1>WUZAPI</h1>
+            </div>
+            <nav>
+                <ul>
+                    <li><a href="/dashboard" class="btn">Voltar ao Dashboard</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <section class="config-section">
+        <div class="config-card">
+            <div class="config-header">
+                <i class="fas fa-comments fa-3x" style="color: #00E676; margin-bottom: 1rem;"></i>
+                <h2>Integração Chatwoot</h2>
+                <p>Configure a conexão sem reiniciar o servidor</p>
+            </div>
+
+            <div class="admin-token-area">
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label><i class="fas fa-lock"></i> Token de Admin do Wuzapi</label>
+                    <input type="password" id="wuzapi_token" class="form-control" placeholder="Digite seu WUZAPI_ADMIN_TOKEN para salvar">
+                </div>
+            </div>
+
+            <hr style="border: 0; border-top: 1px solid #eee; margin: 2rem 0;">
+
+            <div class="form-group">
+                <label>URL do Chatwoot</label>
+                <input type="text" id="cw_url" class="form-control" placeholder="Ex: https://app.chatwoot.com">
+            </div>
+
+            <div class="form-group">
+                <label>Token de Usuário (Access Token)</label>
+                <input type="password" id="cw_token" class="form-control" placeholder="Token do seu perfil no Chatwoot">
+            </div>
+
+            <div class="row">
+                <div class="col">
+                    <div class="form-group">
+                        <label>Account ID</label>
+                        <input type="number" id="cw_account_id" class="form-control" placeholder="Ex: 1">
+                    </div>
+                </div>
+                <div class="col">
+                    <div class="form-group">
+                        <label>Inbox ID</label>
+                        <input type="number" id="cw_inbox_id" class="form-control" placeholder="Ex: 3">
+                    </div>
+                </div>
+            </div>
+
+            <button onclick="saveConfig()" class="btn-save">
+                <i class="fas fa-save"></i> Salvar Configuração
+            </button>
+            
+            <div style="text-align: center; margin-top: 15px;">
+                <a href="#" onclick="loadConfig(); return false;" style="color: #666; font-size: 0.9rem; text-decoration: underline;">Carregar dados atuais</a>
+            </div>
+
+            <div id="statusMsg" class="status-msg"></div>
+        </div>
+    </section>
+
+    <script>
+        // Carrega configurações ao abrir (se tiver token salvo)
+        document.addEventListener('DOMContentLoaded', () => {
+            const savedToken = localStorage.getItem('wuzapi_admin_token');
+            if(savedToken) {
+                document.getElementById('wuzapi_token').value = savedToken;
+                // Opcional: carregar automaticamente se quiser
+                // loadConfig(); 
+            }
+        });
+
+        async function loadConfig() {
+            const adminToken = document.getElementById('wuzapi_token').value;
+            const msgDiv = document.getElementById('statusMsg');
+
+            if (!adminToken) {
+                msgDiv.innerHTML = '<span class="error">Digite o Token de Admin do Wuzapi primeiro.</span>';
+                return;
+            }
+
+            msgDiv.innerHTML = '<span style="color:#666">Carregando...</span>';
+
+            try {
+                const response = await fetch('/chatwoot/config', {
+                    method: 'GET',
+                    headers: { 'Authorization': adminToken }
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    document.getElementById('cw_url').value = data.url || '';
+                    document.getElementById('cw_token').value = data.token || '';
+                    document.getElementById('cw_account_id').value = data.account_id || '';
+                    document.getElementById('cw_inbox_id').value = data.inbox_id || '';
+                    msgDiv.innerHTML = '<span class="success">Dados carregados com sucesso!</span>';
+                    localStorage.setItem('wuzapi_admin_token', adminToken);
+                } else {
+                    msgDiv.innerHTML = '<span class="error">Falha ao carregar. Verifique o Token Admin.</span>';
+                }
+            } catch (e) {
+                msgDiv.innerHTML = '<span class="error">Erro de conexão com o servidor.</span>';
+            }
+        }
+
+        async function saveConfig() {
+            const adminToken = document.getElementById('wuzapi_token').value;
+            const msgDiv = document.getElementById('statusMsg');
+            
+            const payload = {
+                url: document.getElementById('cw_url').value,
+                token: document.getElementById('cw_token').value,
+                account_id: document.getElementById('cw_account_id').value,
+                inbox_id: document.getElementById('cw_inbox_id').value
+            };
+
+            if (!adminToken) {
+                msgDiv.innerHTML = '<span class="error">Token de Admin é obrigatório para salvar!</span>';
+                return;
+            }
+
+            msgDiv.innerHTML = '<span style="color:blue">Salvando...</span>';
+
+            try {
+                const response = await fetch('/chatwoot/config', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': adminToken,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                if (response.ok) {
+                    msgDiv.innerHTML = '<span class="success"><i class="fas fa-check"></i> Configuração salva e ativa!</span>';
+                    localStorage.setItem('wuzapi_admin_token', adminToken);
+                } else {
+                    msgDiv.innerHTML = '<span class="error">Erro ao salvar. Verifique se o Token Admin está correto.</span>';
+                }
+            } catch (e) {
+                msgDiv.innerHTML = '<span class="error">Erro de conexão. O servidor está online?</span>';
+            }
+        }
+    </script>
+</body>
+</html>

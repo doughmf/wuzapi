@@ -9,9 +9,9 @@
       body { background-color: #f4f6f9; padding: 40px 0; }
       .main-container { width: 100%; max-width: 800px; margin: 0 auto; }
       .ui.card { width: 100%; }
-      .section-title { color: #2185d0; margin-top: 20px !important; margin-bottom: 15px !important; }
-      .toggle-container { display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; }
-      .help-text { color: #888; font-size: 0.9em; margin-top: 5px; display: block; }
+      .section-title { color: #2185d0; margin-top: 25px !important; margin-bottom: 15px !important; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+      .toggle-container { display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; background: #fafafa; padding: 10px; border-radius: 5px; }
+      .help-text { color: #888; font-size: 0.85em; margin-top: 5px; display: block; }
   </style>
 </head>
 <body>
@@ -20,8 +20,7 @@
     <div class="ui raised card">
       <div class="content">
         <div class="header">
-            <img src="https://avatars.githubusercontent.com/u/64663960?s=200&v=4" style="width:30px; margin-right:10px; vertical-align:middle;">
-            Integração Chatwoot
+            <i class="comments icon purple"></i> Integração Chatwoot
         </div>
       </div>
       
@@ -29,92 +28,94 @@
         <form class="ui form" id="configForm">
             
             <div class="field toggle-container">
-                <label>Ativo</label>
+                <label><strong>Habilitar Integração</strong></label>
                 <div class="ui toggle checkbox">
                     <input type="checkbox" id="enabled">
-                    <label>Ativar ou desativar o Chatwoot</label>
+                    <label>Ativar</label>
                 </div>
             </div>
 
-            <h4 class="ui dividing header section-title">Conexão</h4>
+            <h4 class="ui header section-title">Conexão</h4>
             
-            <div class="field">
-                <label>URL do Chatwoot</label>
-                <input type="text" id="url" placeholder="https://app.seudominio.com.br">
+            <div class="two fields">
+                <div class="field">
+                    <label>URL do Chatwoot</label>
+                    <input type="text" id="url" placeholder="https://app.seudominio.com">
+                </div>
+                <div class="field">
+                    <label>Account ID</label>
+                    <input type="number" id="account_id" placeholder="Ex: 1">
+                </div>
             </div>
 
             <div class="field">
-                <label>ID da Conta</label>
-                <input type="number" id="account_id" placeholder="Ex: 1">
-            </div>
-
-            <div class="field">
-                <label>Token de Usuário</label>
-                <input type="password" id="token" placeholder="Token do perfil do usuário">
+                <label>Token de Usuário (Chatwoot)</label>
+                <input type="password" id="token" placeholder="Token do perfil do usuário no Chatwoot">
             </div>
 
             <div class="field required">
-                <label style="color:#d9534f">Wuzapi Instance Token (Obrigatório)</label>
+                <label style="color:#d9534f">Wuzapi Instance Token</label>
                 <input type="text" id="session_token" placeholder="Ex: 1234ABCD">
-                <small class="help-text">Necessário para configurar o Webhook.</small>
+                <small class="help-text">Token da sessão do WhatsApp (usado para o Webhook).</small>
             </div>
 
-            <h4 class="ui dividing header section-title">Configurações de Mensagem</h4>
+            <h4 class="ui header section-title">Comportamento</h4>
 
             <div class="field toggle-container">
                 <label>Assinar Mensagens</label>
                 <div class="ui toggle checkbox">
                     <input type="checkbox" id="sign_messages">
-                    <label>Assinar com o nome do agente</label>
+                    <label>Adicionar nome do agente ao final</label>
                 </div>
             </div>
 
             <div class="field">
                 <label>Delimitador de Assinatura</label>
-                <input type="text" id="signature_delimiter" placeholder="\n">
-                <small class="help-text">Ex: \n para quebra de linha</small>
-            </div>
-
-            <h4 class="ui dividing header section-title">Caixa de Entrada</h4>
-
-            <div class="field">
-                <label>Nome da Caixa de Entrada</label>
-                <input type="text" id="inbox_name" placeholder="Ex: Setor de Cartões">
-            </div>
-
-            <div class="field">
-                <label>Organização</label>
-                <input type="text" id="organization">
-            </div>
-
-            <div class="field">
-                <label>Logo (URL)</label>
-                <input type="text" id="logo_url">
-            </div>
-
-            <div class="field toggle-container">
-                <label>Conversa Pendente</label>
-                <div class="ui toggle checkbox">
-                    <input type="checkbox" id="conversation_pending">
-                    <label>Conversas começam como pendentes (Desativa auto-atribuição)</label>
-                </div>
+                <input type="text" id="signature_delimiter" placeholder="\n" value="\n">
+                <small class="help-text">Use \n para pular linha.</small>
             </div>
 
             <div class="field toggle-container">
                 <label>Reabrir Conversa</label>
                 <div class="ui toggle checkbox">
                     <input type="checkbox" id="reopen_conversation">
-                    <label>Reabrir a conversa ao receber mensagem</label>
+                    <label>Reabrir ticket resolvido ao receber nova mensagem</label>
                 </div>
             </div>
 
-            <h4 class="ui dividing header section-title">Importação</h4>
+            <div class="field toggle-container">
+                <label>Iniciar como Pendente</label>
+                <div class="ui toggle checkbox">
+                    <input type="checkbox" id="conversation_pending">
+                    <label>Conversas iniciam na aba "Pendentes" (Desativa auto-atribuição)</label>
+                </div>
+            </div>
+
+            <h4 class="ui header section-title">Configuração da Caixa</h4>
+
+            <div class="field">
+                <label>Nome da Caixa</label>
+                <input type="text" id="inbox_name" placeholder="Ex: WhatsApp Suporte">
+            </div>
+
+            <div class="two fields">
+                <div class="field">
+                    <label>Nome da Organização</label>
+                    <input type="text" id="organization" placeholder="Nome da Empresa">
+                </div>
+                <div class="field">
+                    <label>Logo URL</label>
+                    <input type="text" id="logo_url" placeholder="https://...">
+                </div>
+            </div>
+
+            <h4 class="ui header section-title">Importação & Filtros</h4>
 
             <div class="field toggle-container">
                 <label>Importar Contatos</label>
                 <div class="ui toggle checkbox">
                     <input type="checkbox" id="import_contacts">
-                    <label>Importar contatos do WhatsApp ao conectar</label>
+                    <label>Sincronizar contatos do celular</label>
                 </div>
             </div>
 
@@ -122,25 +123,28 @@
                 <label>Importar Mensagens</label>
                 <div class="ui toggle checkbox">
                     <input type="checkbox" id="import_messages">
-                    <label>Importar mensagens antigas</label>
+                    <label>Importar histórico de conversas</label>
                 </div>
             </div>
 
             <div class="field">
-                <label>Limite de Dias para Importação</label>
+                <label>Limite de Dias (Histórico)</label>
                 <input type="number" id="days_limit" value="7">
             </div>
 
             <div class="field">
-                <label>Ignorar JIDs</label>
-                <input type="text" id="ignore_jids_input" placeholder="Digite o número e pressione Enter">
-                <div id="jids_list" style="margin-top:10px;"></div>
+                <label>Ignorar Números (JIDs)</label>
+                <div class="ui action input">
+                    <input type="text" id="ignore_input" placeholder="5511999999999@s.whatsapp.net">
+                    <button type="button" class="ui button" onclick="addJID()">Adicionar</button>
+                </div>
+                <div id="jids_list" class="ui labels" style="margin-top:10px"></div>
             </div>
 
             <div class="ui divider"></div>
             
-            <div class="field" style="display:none;">
-                <label>Token Admin (Oculto)</label>
+            <div class="field">
+                <label>Admin Token (Wuzapi)</label>
                 <input type="password" id="wuzapi_admin_token">
             </div>
 
@@ -173,24 +177,14 @@
         if(savedToken) document.getElementById('wuzapi_admin_token').value = savedToken;
         $('.ui.checkbox').checkbox();
         loadConfig();
-
-        // Lógica de JIDs
-        $('#ignore_jids_input').on('keydown', function(e) {
-            if(e.key === 'Enter') {
-                e.preventDefault();
-                const val = this.value.trim();
-                if(val) {
-                    addJID(val);
-                    this.value = '';
-                }
-            }
-        });
     });
 
-    function addJID(jid) {
-        if(!ignoreJIDs.includes(jid)) {
-            ignoreJIDs.push(jid);
+    function addJID() {
+        const val = $('#ignore_input').val().trim();
+        if(val && !ignoreJIDs.includes(val)) {
+            ignoreJIDs.push(val);
             renderJIDs();
+            $('#ignore_input').val('');
         }
     }
 
@@ -203,12 +197,7 @@
         const container = $('#jids_list');
         container.empty();
         ignoreJIDs.forEach(jid => {
-            container.append(`
-                <div class="ui label">
-                    ${jid}
-                    <i class="delete icon" onclick="removeJID('${jid}')"></i>
-                </div>
-            `);
+            container.append(`<a class="ui label">${jid}<i class="delete icon" onclick="removeJID('${jid}')"></i></a>`);
         });
     }
 
@@ -245,7 +234,6 @@
             if(res.ok) {
                 const data = await res.json();
                 
-                // Preenche campos
                 if(data.enabled) $('#enabled').checkbox('check');
                 $('#url').val(data.url);
                 $('#account_id').val(data.account_id);
@@ -280,8 +268,8 @@
         
         form.removeClass('error success loading');
         
-        if(!sessionToken) {
-            $('#errorMessage').text("Instance Token é obrigatório para configurar.");
+        if(!sessionToken || !adminToken) {
+            $('#errorMessage').text("Preencha o Token de Admin e o Token da Instância.");
             form.addClass('error');
             return;
         }

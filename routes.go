@@ -109,6 +109,9 @@ func (s *server) routes() {
 	// Configurar via API (POST) e Consultar (GET)
 	s.router.Handle("/chatwoot/config", s.HandleSetChatwootConfig()).Methods("POST")
 	s.router.Handle("/chatwoot/config", s.HandleGetChatwootConfig()).Methods("GET")
+
+	// Rota para CRIAR CAIXA AUTOMATICAMENTE (NOVO)
+	s.router.Handle("/chatwoot/auto-create", s.HandleAutoCreateInbox()).Methods("POST")
 	
 	// Receber mensagens do Chatwoot
 	s.router.HandleFunc("/chatwoot/webhook", s.HandleChatwootWebhook()).Methods("POST")

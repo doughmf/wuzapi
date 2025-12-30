@@ -14,7 +14,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
@@ -23,23 +22,22 @@ import (
 
 // --- CONFIGURAÇÃO ---
 type ChatwootConfig struct {
-	Enabled   bool   `json:"enabled"`
-	URL       string `json:"url"`
-	Token     string `json:"token"`
-	AccountID string `json:"account_id"`
-	InboxID   string `json:"inbox_id"`
-
-	SignMessages             bool   `json:"sign_messages"`
-	SignatureDelimiter       string `json:"signature_delimiter"`
-	ReopenConversation       bool   `json:"reopen_conversation"`
-	ConversationPending      bool   `json:"conversation_pending"`
-	InboxName                string `json:"inbox_name"`
-	Organization             string `json:"organization"`
-	LogoURL                  string `json:"logo_url"`
-	ImportContacts           bool   `json:"import_contacts"`
-	ImportMessages           bool   `json:"import_messages"`
-	DaysLimit                int    `json:"days_limit"`
-	IgnoreJIDs               []string `json:"ignore_jids"`
+	Enabled             bool     `json:"enabled"`
+	URL                 string   `json:"url"`
+	Token               string   `json:"token"`
+	AccountID           string   `json:"account_id"`
+	InboxID             string   `json:"inbox_id"`
+	SignMessages        bool     `json:"sign_messages"`
+	SignatureDelimiter  string   `json:"signature_delimiter"`
+	ReopenConversation  bool     `json:"reopen_conversation"`
+	ConversationPending bool     `json:"conversation_pending"`
+	InboxName           string   `json:"inbox_name"`
+	Organization        string   `json:"organization"`
+	LogoURL             string   `json:"logo_url"`
+	ImportContacts      bool     `json:"import_contacts"`
+	ImportMessages      bool     `json:"import_messages"`
+	DaysLimit           int      `json:"days_limit"`
+	IgnoreJIDs          []string `json:"ignore_jids"`
 }
 
 var (
@@ -51,12 +49,14 @@ const configFile = "chatwoot.json"
 
 func init() {
 	loadConfig()
+	// Ignora erro de certificado SSL para downloads de mídia
+	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 }
 
 func loadConfig() {
 	cwCfgMutex.Lock()
 	defer cwCfgMutex.Unlock()
-	
+
 	cwCfg = ChatwootConfig{
 		SignatureDelimiter: "\n",
 		DaysLimit:          7,
@@ -68,7 +68,7 @@ func loadConfig() {
 		json.NewDecoder(file).Decode(&cwCfg)
 		return
 	}
-	
+
 	cwCfg.URL = strings.TrimSpace(os.Getenv("CHATWOOT_URL"))
 	cwCfg.Token = strings.TrimSpace(os.Getenv("CHATWOOT_TOKEN"))
 	cwCfg.AccountID = strings.TrimSpace(os.Getenv("CHATWOOT_ACCOUNT_ID"))
@@ -118,13 +118,12 @@ type ChatwootContactResponse struct {
 	} `json:"payload"`
 }
 
-// ESTRUTURAS DE WEBHOOK (COM ANEXOS)
 type CwAttachment struct {
-	ID        int    `json:"id"`
+	ID          int    `json:"id"`
 	MessageType string `json:"message_type"`
-	FileType  string `json:"file_type"`
-	DataUrl   string `json:"data_url"`
-	ThumbUrl  string `json:"thumb_url"`
+	FileType    string `json:"file_type"`
+	DataUrl     string `json:"data_url"`
+	ThumbUrl    string `json:"thumb_url"`
 }
 
 type CwWebhook struct {
@@ -212,6 +211,8 @@ func (s *server) HandleAutoCreateInbox() http.HandlerFunc {
 
 		cfg := body.Config
 		cfg.URL = strings.TrimSuffix(cfg.URL, "/")
+		
+		// Configura o webhook com o token da sessão
 		webhookEndpoint := fmt.Sprintf("%s/chatwoot/webhook?token=%s", body.WuzapiURL, body.SessionToken)
 
 		cwPayload := CreateInboxRequest{
@@ -265,7 +266,6 @@ func (s *server) HandleAutoCreateInbox() http.HandlerFunc {
 // --- LÓGICA DE CONTATO ---
 
 func getOrCreateContact(baseURL, accountID, token string, inboxID int, phone, name string) int {
-	// Busca contato
 	searchURL := fmt.Sprintf("%s/api/v1/accounts/%s/contacts/search?q=%s", baseURL, accountID, strings.Replace(phone, "+", "%2B", -1))
 	req, _ := http.NewRequest("GET", searchURL, nil)
 	req.Header.Set("api_access_token", token)
@@ -276,20 +276,26 @@ func getOrCreateContact(baseURL, accountID, token string, inboxID int, phone, na
 		var searchRes ChatwootSearchResponse
 		json.Unmarshal(body, &searchRes)
 		resp.Body.Close()
-		if len(searchRes.Payload) > 0 { return searchRes.Payload[0].ID }
+		if len(searchRes.Payload) > 0 {
+			return searchRes.Payload[0].ID
+		}
 	}
 	
-	// Cria contato
 	createURL := fmt.Sprintf("%s/api/v1/accounts/%s/contacts", baseURL, accountID)
 	payload := map[string]interface{}{
-		"inbox_id": inboxID, "name": name, "phone_number": phone, "source_id": phone,
+		"inbox_id":     inboxID,
+		"name":         name,
+		"phone_number": phone,
+		"source_id":    phone, // Importante para o mapeamento
 	}
 	jsonPayload, _ := json.Marshal(payload)
 	reqCreate, _ := http.NewRequest("POST", createURL, bytes.NewBuffer(jsonPayload))
 	reqCreate.Header.Set("Content-Type", "application/json")
 	reqCreate.Header.Set("api_access_token", token)
 	respCreate, err := client.Do(reqCreate)
-	if err != nil { return 0 }
+	if err != nil {
+		return 0
+	}
 	defer respCreate.Body.Close()
 	if respCreate.StatusCode == 200 {
 		var contactRes ChatwootContactResponse
@@ -299,14 +305,16 @@ func getOrCreateContact(baseURL, accountID, token string, inboxID int, phone, na
 	return 0
 }
 
-// --- ENVIO: WHATSAPP -> CHATWOOT (TEXTO) ---
+// --- ENVIO: WHATSAPP -> CHATWOOT ---
 
 func SendToChatwoot(pushName string, senderUser string, text string) {
 	cwCfgMutex.RLock()
 	cfg := cwCfg
 	cwCfgMutex.RUnlock()
 
-	if !cfg.Enabled || cfg.URL == "" || cfg.Token == "" { return }
+	if !cfg.Enabled || cfg.URL == "" || cfg.Token == "" {
+		return
+	}
 
 	cwInboxID, _ := strconv.Atoi(cfg.InboxID)
 	phoneClean := strings.Replace(senderUser, "+", "", -1)
@@ -314,12 +322,19 @@ func SendToChatwoot(pushName string, senderUser string, text string) {
 	phoneNumber := "+" + phoneClean
 
 	contactID := getOrCreateContact(cfg.URL, cfg.AccountID, cfg.Token, cwInboxID, phoneNumber, pushName)
-	if contactID == 0 { return }
+	if contactID == 0 {
+		return
+	}
 
 	url := fmt.Sprintf("%s/api/v1/accounts/%s/conversations", cfg.URL, cfg.AccountID)
 	payload := map[string]interface{}{
-		"inbox_id": cwInboxID, "contact_id": contactID, "status": "open",
-		"message": map[string]string{"content": text, "message_type": "incoming"},
+		"inbox_id":     cwInboxID,
+		"contact_id":   contactID,
+		"status":       "open",
+		"message": map[string]string{
+			"content":      text,
+			"message_type": "incoming",
+		},
 	}
 	jsonPayload, _ := json.Marshal(payload)
 	req, _ := http.NewRequest("POST", url, bytes.NewBuffer(jsonPayload))
@@ -327,17 +342,20 @@ func SendToChatwoot(pushName string, senderUser string, text string) {
 	req.Header.Set("api_access_token", cfg.Token)
 	client := &http.Client{}
 	resp, _ := client.Do(req)
-	if resp != nil { resp.Body.Close() }
+	if resp != nil {
+		resp.Body.Close()
+	}
 }
 
-// --- ENVIO: WHATSAPP -> CHATWOOT (MÍDIA/ANEXOS) ---
-// Esta função deve ser chamada pelo seu client.go quando chegar imagem/audio/video
+// Função para envio de anexos (Disponível para uso futuro no client.go)
 func SendAttachmentToChatwoot(pushName, senderUser, caption, fileName string, fileData []byte) {
 	cwCfgMutex.RLock()
 	cfg := cwCfg
 	cwCfgMutex.RUnlock()
 
-	if !cfg.Enabled || cfg.URL == "" || cfg.Token == "" { return }
+	if !cfg.Enabled || cfg.URL == "" || cfg.Token == "" {
+		return
+	}
 
 	cwInboxID, _ := strconv.Atoi(cfg.InboxID)
 	phoneClean := strings.Replace(senderUser, "+", "", -1)
@@ -345,24 +363,22 @@ func SendAttachmentToChatwoot(pushName, senderUser, caption, fileName string, fi
 	phoneNumber := "+" + phoneClean
 
 	contactID := getOrCreateContact(cfg.URL, cfg.AccountID, cfg.Token, cwInboxID, phoneNumber, pushName)
-	if contactID == 0 { return }
+	if contactID == 0 {
+		return
+	}
 
-	// Criação do Multipart (Form-Data)
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 
-	// Anexa o arquivo
 	part, _ := writer.CreateFormFile("attachments[]", fileName)
 	part.Write(fileData)
 
-	// Campos de texto
-	writer.WriteField("content", caption) // Legenda da foto ou vazio
+	writer.WriteField("content", caption)
 	writer.WriteField("message_type", "incoming")
 	writer.WriteField("inbox_id", cfg.InboxID)
 	writer.WriteField("contact_id", strconv.Itoa(contactID))
 	writer.Close()
 
-	// Envia para o Chatwoot
 	url := fmt.Sprintf("%s/api/v1/accounts/%s/conversations", cfg.URL, cfg.AccountID)
 	req, _ := http.NewRequest("POST", url, body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
@@ -370,57 +386,76 @@ func SendAttachmentToChatwoot(pushName, senderUser, caption, fileName string, fi
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
-	if err != nil {
-		fmt.Printf("Erro upload Chatwoot: %v\n", err)
-		return
+	if err == nil {
+		defer resp.Body.Close()
 	}
-	defer resp.Body.Close()
 }
 
-// --- WEBHOOK: CHATWOOT -> WHATSAPP (TEXTO E MÍDIA) ---
+// --- WEBHOOK: CHATWOOT -> WHATSAPP ---
 
 func (s *server) HandleChatwootWebhook() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token := r.URL.Query().Get("token")
-		if token == "" { w.WriteHeader(http.StatusOK); return }
-		
+		if token == "" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
 		var payload CwWebhook
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil { w.WriteHeader(http.StatusOK); return }
-		
-		// Filtro de segurança
-		if payload.Event != "message_created" || payload.MessageType != "outgoing" { w.WriteHeader(http.StatusOK); return }
-		
-		// Carrega config
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		if payload.Event != "message_created" || payload.MessageType != "outgoing" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
 		cwCfgMutex.RLock()
 		cfg := cwCfg
 		cwCfgMutex.RUnlock()
 
+		// Busca sessão pelo token
 		userInfo, found := userinfocache.Get(token)
-		if !found { w.WriteHeader(http.StatusOK); return }
+		if !found {
+			fmt.Printf("[Chatwoot] Erro: Sessão não encontrada para o token %s\n", token)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
 		w.WriteHeader(http.StatusOK)
-		
+
 		go func() {
 			vals, ok := userInfo.(Values)
-			if !ok { return }
+			if !ok {
+				return
+			}
 			userID := vals.Get("Id")
 			client := clientManager.GetWhatsmeowClient(userID)
-			if client == nil || !client.IsConnected() { return }
+			if client == nil || !client.IsConnected() {
+				return
+			}
 
-			// Recupera número
+			// Recupera telefone
 			phone := payload.Conversation.Contact.PhoneNumber
-			if phone == "" { phone = payload.Conversation.ContactInbox.SourceID }
+			if phone == "" {
+				phone = payload.Conversation.ContactInbox.SourceID
+			}
 			phone = strings.ReplaceAll(phone, "+", "")
 			phone = strings.ReplaceAll(phone, " ", "")
-			if len(phone) < 8 { return }
+			if len(phone) < 8 {
+				return
+			}
 			jid, _ := parseJID(phone)
 
-			// 1. ENVIO DE MÍDIA (SE HOUVER)
+			// 1. Envio de Mídia
 			if len(payload.Attachments) > 0 {
 				for _, att := range payload.Attachments {
 					sendChatwootMedia(client, jid, att)
 				}
 			} else {
-				// 2. ENVIO DE TEXTO (SE NÃO TIVER MÍDIA)
+				// 2. Envio de Texto
 				finalMessage := payload.Content
 				if cfg.SignMessages && payload.Sender.Name != "" {
 					delimiter := strings.ReplaceAll(cfg.SignatureDelimiter, `\n`, "\n")
@@ -434,17 +469,18 @@ func (s *server) HandleChatwootWebhook() http.HandlerFunc {
 	}
 }
 
-// Função auxiliar para baixar e enviar mídia do Chatwoot
 func sendChatwootMedia(client *whatsmeow.Client, jid any, att CwAttachment) {
-	// Baixa o arquivo
 	resp, err := http.Get(att.DataUrl)
-	if err != nil { return }
+	if err != nil {
+		return
+	}
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
 
-	// Identifica tipo e envia
-	uploadResp, err := client.Upload(context.Background(), data, whatsmeow.MediaImage) // Default image, pode ajustar
-	if err != nil { return }
+	uploadResp, err := client.Upload(context.Background(), data, whatsmeow.MediaImage)
+	if err != nil {
+		return
+	}
 
 	switch att.FileType {
 	case "image":
@@ -463,15 +499,14 @@ func sendChatwootMedia(client *whatsmeow.Client, jid any, att CwAttachment) {
 			Url:           proto.String(uploadResp.URL),
 			DirectPath:    proto.String(uploadResp.DirectPath),
 			MediaKey:      uploadResp.MediaKey,
-			Mimetype:      proto.String("audio/ogg; codecs=opus"), // WhatsApp gosta de opus
+			Mimetype:      proto.String("audio/ogg; codecs=opus"),
 			FileEncSha256: uploadResp.FileEncSHA256,
 			FileSha256:    uploadResp.FileSHA256,
 			FileLength:    proto.Uint64(uint64(len(data))),
-			Ptt:           proto.Bool(true), // Envia como nota de voz
+			Ptt:           proto.Bool(true),
 		}
 		client.SendMessage(context.Background(), jid, &waE2E.Message{AudioMessage: msg})
 	default:
-		// Documento Genérico
 		msg := &waE2E.DocumentMessage{
 			Url:           proto.String(uploadResp.URL),
 			DirectPath:    proto.String(uploadResp.DirectPath),
@@ -480,13 +515,8 @@ func sendChatwootMedia(client *whatsmeow.Client, jid any, att CwAttachment) {
 			FileEncSha256: uploadResp.FileEncSHA256,
 			FileSha256:    uploadResp.FileSHA256,
 			FileLength:    proto.Uint64(uint64(len(data))),
-			FileName:      proto.String(filepath.Base(att.DataUrl)),
+			FileName:      proto.String("arquivo"),
 		}
 		client.SendMessage(context.Background(), jid, &waE2E.Message{DocumentMessage: msg})
 	}
-}
-
-// Configura o TLS para downloads seguros se necessário
-func init() {
-	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 }

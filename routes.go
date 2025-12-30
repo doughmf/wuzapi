@@ -102,13 +102,17 @@ func (s *server) routes() {
 	s.router.Handle("/session/hmac/config", c.Then(s.ConfigureHmac())).Methods("POST")
 	s.router.Handle("/session/hmac/config", c.Then(s.GetHmacConfig())).Methods("GET")
 	s.router.Handle("/session/hmac/config", c.Then(s.DeleteHmacConfig())).Methods("DELETE")
-	s.router.Handle("/session/hmac/config", c.Then(s.DeleteHmacConfig())).Methods("DELETE")
 
-	// --- NOVA ROTA DO CHATWOOT ---
+	// =================================================================
+	// ROTAS CHATWOOT (WEBHOOK + CONFIGURAÇÃO DINÂMICA)
+	// =================================================================
+	// Configurar via API (POST) e Consultar (GET)
+	s.router.Handle("/chatwoot/config", s.HandleSetChatwootConfig()).Methods("POST")
+	s.router.Handle("/chatwoot/config", s.HandleGetChatwootConfig()).Methods("GET")
+	
+	// Receber mensagens do Chatwoot
 	s.router.HandleFunc("/chatwoot/webhook", s.HandleChatwootWebhook()).Methods("POST")
-	// -----------------------------
-
-	s.router.Handle("/chat/send/text", c.Then(s.SendMessage())).Methods("POST")
+	// =================================================================
 
 	s.router.Handle("/chat/send/text", c.Then(s.SendMessage())).Methods("POST")
 	s.router.Handle("/chat/delete", c.Then(s.DeleteMessage())).Methods("POST")

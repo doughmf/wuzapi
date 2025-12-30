@@ -3,44 +3,43 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
+	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"google.golang.org/protobuf/proto"
 )
 
-// --- CONFIGURAÇÃO COMPLETA (Baseada no Evolution) ---
+// --- CONFIGURAÇÃO ---
 type ChatwootConfig struct {
-	// Conexão
 	Enabled   bool   `json:"enabled"`
 	URL       string `json:"url"`
-	AccountID string `json:"account_id"`
 	Token     string `json:"token"`
+	AccountID string `json:"account_id"`
 	InboxID   string `json:"inbox_id"`
 
-	// Comportamento
-	SignMessages       bool   `json:"sign_messages"`
-	SignatureDelimiter string `json:"signature_delimiter"`
-	ReopenConversation bool   `json:"reopen_conversation"`
-	ConversationPending bool  `json:"conversation_pending"` // Se true, desativa auto-assignment
-
-	// Dados da Caixa
-	InboxName    string `json:"inbox_name"`
-	Organization string `json:"organization"`
-	LogoURL      string `json:"logo_url"`
-
-	// Importação e Filtros (Armazenados para uso futuro na lógica core)
-	ImportContacts bool     `json:"import_contacts"`
-	ImportMessages bool     `json:"import_messages"`
-	DaysLimit      int      `json:"days_limit"`
-	IgnoreJIDs     []string `json:"ignore_jids"`
+	SignMessages             bool   `json:"sign_messages"`
+	SignatureDelimiter       string `json:"signature_delimiter"`
+	ReopenConversation       bool   `json:"reopen_conversation"`
+	ConversationPending      bool   `json:"conversation_pending"`
+	InboxName                string `json:"inbox_name"`
+	Organization             string `json:"organization"`
+	LogoURL                  string `json:"logo_url"`
+	ImportContacts           bool   `json:"import_contacts"`
+	ImportMessages           bool   `json:"import_messages"`
+	DaysLimit                int    `json:"days_limit"`
+	IgnoreJIDs               []string `json:"ignore_jids"`
 }
 
 var (
@@ -58,7 +57,6 @@ func loadConfig() {
 	cwCfgMutex.Lock()
 	defer cwCfgMutex.Unlock()
 	
-	// Valores padrão
 	cwCfg = ChatwootConfig{
 		SignatureDelimiter: "\n",
 		DaysLimit:          7,
@@ -71,7 +69,6 @@ func loadConfig() {
 		return
 	}
 	
-	// Fallback para .env apenas para conexão básica
 	cwCfg.URL = strings.TrimSpace(os.Getenv("CHATWOOT_URL"))
 	cwCfg.Token = strings.TrimSpace(os.Getenv("CHATWOOT_TOKEN"))
 	cwCfg.AccountID = strings.TrimSpace(os.Getenv("CHATWOOT_ACCOUNT_ID"))
@@ -88,7 +85,7 @@ func saveConfigToDisk(cfg ChatwootConfig) {
 	json.NewEncoder(file).Encode(cfg)
 }
 
-// --- ESTRUTURAS CHATWOOT API ---
+// --- ESTRUTURAS ---
 
 type CreateInboxChannel struct {
 	Type       string `json:"type"`
@@ -98,9 +95,8 @@ type CreateInboxChannel struct {
 type CreateInboxRequest struct {
 	Name                       string             `json:"name"`
 	Channel                    CreateInboxChannel `json:"channel"`
-	AllowMessagesAfterResolved bool               `json:"allow_messages_after_resolved"` // Reabrir conversa
-	EnableAutoAssignment       bool               `json:"enable_auto_assignment"`        // Conversa pendente (inverso)
-	Avatar                     string             `json:"avatar,omitempty"`              // Logo (URL não suportada diretamente no create por JSON simples, mas mantido estrutura)
+	AllowMessagesAfterResolved bool               `json:"allow_messages_after_resolved"`
+	EnableAutoAssignment       bool               `json:"enable_auto_assignment"`
 }
 
 type CreateInboxResponse struct {
@@ -122,12 +118,22 @@ type ChatwootContactResponse struct {
 	} `json:"payload"`
 }
 
+// ESTRUTURAS DE WEBHOOK (COM ANEXOS)
+type CwAttachment struct {
+	ID        int    `json:"id"`
+	MessageType string `json:"message_type"`
+	FileType  string `json:"file_type"`
+	DataUrl   string `json:"data_url"`
+	ThumbUrl  string `json:"thumb_url"`
+}
+
 type CwWebhook struct {
-	Event        string `json:"event"`
-	MessageType  string `json:"message_type"`
-	Content      string `json:"content"`
+	Event        string         `json:"event"`
+	MessageType  string         `json:"message_type"`
+	Content      string         `json:"content"`
+	Attachments  []CwAttachment `json:"attachments"`
 	Sender       struct {
-		Name string `json:"name"` // Nome do agente para assinatura
+		Name string `json:"name"`
 	} `json:"sender"`
 	Conversation struct {
 		ContactInbox struct {
@@ -138,6 +144,8 @@ type CwWebhook struct {
 		} `json:"contact"`
 	} `json:"conversation"`
 }
+
+// --- UTILITÁRIOS ---
 
 func sendJsonError(w http.ResponseWriter, msg string, code int) {
 	w.Header().Set("Content-Type", "application/json")
@@ -177,40 +185,8 @@ func (s *server) HandleGetChatwootConfig() http.HandlerFunc {
 	}
 }
 
-// --- AUTO CRIAÇÃO COM PARÂMETROS AVANÇADOS ---
+// --- AUTO CRIAÇÃO ---
 func (s *server) HandleAutoCreateInbox() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != os.Getenv("WUZAPI_ADMIN_TOKEN") {
-			sendJsonError(w, "Token Admin inválido", http.StatusUnauthorized)
-			return
-		}
-
-		// Recebe a config completa do front
-		var reqConfig ChatwootConfig
-		if err := json.NewDecoder(r.Body).Decode(&reqConfig); err != nil {
-			sendJsonError(w, "JSON inválido", http.StatusBadRequest)
-			return
-		}
-
-		// Validações básicas
-		sessionToken := r.URL.Query().Get("session_token") // Passado via Query ou body, vamos usar o struct se vier
-		if sessionToken == "" {
-			// Tenta pegar de um header customizado ou assume que veio no body se eu mudasse a struct de request
-			// Para simplificar, o front vai mandar tudo dentro de ChatwootConfig, mas precisamos do session_token para o webhook
-			// Vamos assumir que o front manda um campo extra ou o usuário configurou a sessão no WuzAPI
-			sendJsonError(w, "Token da Sessão obrigatório na URL (?session_token=...)", http.StatusBadRequest)
-			return
-		}
-
-		reqConfig.URL = strings.TrimSuffix(reqConfig.URL, "/")
-		
-		// Webhook
-		webhookEndpoint := fmt.Sprintf("%s/chatwoot/webhook?token=%s", os.Getenv("WUZAPI_PUBLIC_URL"), sessionToken) 
-		// Nota: se WUZAPI_PUBLIC_URL não existir, o front deve mandar a url. 
-		// Ajuste: Vamos pegar a URL do webhook enviada pelo front num campo auxiliar se necessário, 
-		// mas o padrão é o front mandar a config. Vamos usar uma struct wrapper.
-	}
-	// *CORREÇÃO*: Para não quebrar o handler, vou reescrever a lógica de input para aceitar o JSON misto.
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Wrapper para receber config + session_token
 		type Wrapper struct {
@@ -224,6 +200,11 @@ func (s *server) HandleAutoCreateInbox() http.HandlerFunc {
 			return
 		}
 
+		if r.Header.Get("Authorization") != os.Getenv("WUZAPI_ADMIN_TOKEN") {
+			sendJsonError(w, "Token de Admin inválido", http.StatusUnauthorized)
+			return
+		}
+
 		if body.SessionToken == "" {
 			sendJsonError(w, "Instance Token obrigatório", http.StatusBadRequest)
 			return
@@ -233,15 +214,14 @@ func (s *server) HandleAutoCreateInbox() http.HandlerFunc {
 		cfg.URL = strings.TrimSuffix(cfg.URL, "/")
 		webhookEndpoint := fmt.Sprintf("%s/chatwoot/webhook?token=%s", body.WuzapiURL, body.SessionToken)
 
-		// Mapeia configurações do Evolution para o Chatwoot
 		cwPayload := CreateInboxRequest{
 			Name: cfg.InboxName,
 			Channel: CreateInboxChannel{
 				Type:       "api",
 				WebhookUrl: webhookEndpoint,
 			},
-			AllowMessagesAfterResolved: cfg.ReopenConversation,     // Reabrir Conversa
-			EnableAutoAssignment:       !cfg.ConversationPending,   // Se Pendente=True, AutoAssign=False
+			AllowMessagesAfterResolved: cfg.ReopenConversation,
+			EnableAutoAssignment:       !cfg.ConversationPending,
 		}
 		jsonPayload, _ := json.Marshal(cwPayload)
 
@@ -270,7 +250,6 @@ func (s *server) HandleAutoCreateInbox() http.HandlerFunc {
 			return
 		}
 
-		// Atualiza ID e Salva
 		cfg.InboxID = strconv.Itoa(cwResp.Id)
 		saveConfigToDisk(cfg)
 
@@ -283,30 +262,10 @@ func (s *server) HandleAutoCreateInbox() http.HandlerFunc {
 	}
 }
 
-// --- ENVIO (Wuzapi -> Chatwoot) ---
-
-func SendToChatwoot(pushName string, senderUser string, text string) {
-	cwCfgMutex.RLock()
-	cfg := cwCfg
-	cwCfgMutex.RUnlock()
-
-	if !cfg.Enabled || cfg.URL == "" || cfg.Token == "" {
-		return
-	}
-
-	cwInboxID, _ := strconv.Atoi(cfg.InboxID)
-	phoneClean := strings.Replace(senderUser, "+", "", -1)
-	phoneClean = strings.Split(phoneClean, "@")[0]
-	phoneNumber := "+" + phoneClean
-
-	contactID := getOrCreateContact(cfg.URL, cfg.AccountID, cfg.Token, cwInboxID, phoneNumber, pushName)
-	if contactID == 0 {
-		return
-	}
-	sendConversation(cfg.URL, cfg.AccountID, cfg.Token, cwInboxID, contactID, text)
-}
+// --- LÓGICA DE CONTATO ---
 
 func getOrCreateContact(baseURL, accountID, token string, inboxID int, phone, name string) int {
+	// Busca contato
 	searchURL := fmt.Sprintf("%s/api/v1/accounts/%s/contacts/search?q=%s", baseURL, accountID, strings.Replace(phone, "+", "%2B", -1))
 	req, _ := http.NewRequest("GET", searchURL, nil)
 	req.Header.Set("api_access_token", token)
@@ -319,6 +278,8 @@ func getOrCreateContact(baseURL, accountID, token string, inboxID int, phone, na
 		resp.Body.Close()
 		if len(searchRes.Payload) > 0 { return searchRes.Payload[0].ID }
 	}
+	
+	// Cria contato
 	createURL := fmt.Sprintf("%s/api/v1/accounts/%s/contacts", baseURL, accountID)
 	payload := map[string]interface{}{
 		"inbox_id": inboxID, "name": name, "phone_number": phone, "source_id": phone,
@@ -338,41 +299,104 @@ func getOrCreateContact(baseURL, accountID, token string, inboxID int, phone, na
 	return 0
 }
 
-func sendConversation(baseURL, accountID, token string, inboxID, contactID int, text string) {
-	url := fmt.Sprintf("%s/api/v1/accounts/%s/conversations", baseURL, accountID)
+// --- ENVIO: WHATSAPP -> CHATWOOT (TEXTO) ---
+
+func SendToChatwoot(pushName string, senderUser string, text string) {
+	cwCfgMutex.RLock()
+	cfg := cwCfg
+	cwCfgMutex.RUnlock()
+
+	if !cfg.Enabled || cfg.URL == "" || cfg.Token == "" { return }
+
+	cwInboxID, _ := strconv.Atoi(cfg.InboxID)
+	phoneClean := strings.Replace(senderUser, "+", "", -1)
+	phoneClean = strings.Split(phoneClean, "@")[0]
+	phoneNumber := "+" + phoneClean
+
+	contactID := getOrCreateContact(cfg.URL, cfg.AccountID, cfg.Token, cwInboxID, phoneNumber, pushName)
+	if contactID == 0 { return }
+
+	url := fmt.Sprintf("%s/api/v1/accounts/%s/conversations", cfg.URL, cfg.AccountID)
 	payload := map[string]interface{}{
-		"inbox_id": inboxID, "contact_id": contactID, "status": "open",
+		"inbox_id": cwInboxID, "contact_id": contactID, "status": "open",
 		"message": map[string]string{"content": text, "message_type": "incoming"},
 	}
 	jsonPayload, _ := json.Marshal(payload)
 	req, _ := http.NewRequest("POST", url, bytes.NewBuffer(jsonPayload))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("api_access_token", token)
+	req.Header.Set("api_access_token", cfg.Token)
 	client := &http.Client{}
 	resp, _ := client.Do(req)
 	if resp != nil { resp.Body.Close() }
 }
 
-// --- WEBHOOK (Chatwoot -> Wuzapi) ---
+// --- ENVIO: WHATSAPP -> CHATWOOT (MÍDIA/ANEXOS) ---
+// Esta função deve ser chamada pelo seu client.go quando chegar imagem/audio/video
+func SendAttachmentToChatwoot(pushName, senderUser, caption, fileName string, fileData []byte) {
+	cwCfgMutex.RLock()
+	cfg := cwCfg
+	cwCfgMutex.RUnlock()
+
+	if !cfg.Enabled || cfg.URL == "" || cfg.Token == "" { return }
+
+	cwInboxID, _ := strconv.Atoi(cfg.InboxID)
+	phoneClean := strings.Replace(senderUser, "+", "", -1)
+	phoneClean = strings.Split(phoneClean, "@")[0]
+	phoneNumber := "+" + phoneClean
+
+	contactID := getOrCreateContact(cfg.URL, cfg.AccountID, cfg.Token, cwInboxID, phoneNumber, pushName)
+	if contactID == 0 { return }
+
+	// Criação do Multipart (Form-Data)
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+
+	// Anexa o arquivo
+	part, _ := writer.CreateFormFile("attachments[]", fileName)
+	part.Write(fileData)
+
+	// Campos de texto
+	writer.WriteField("content", caption) // Legenda da foto ou vazio
+	writer.WriteField("message_type", "incoming")
+	writer.WriteField("inbox_id", cfg.InboxID)
+	writer.WriteField("contact_id", strconv.Itoa(contactID))
+	writer.Close()
+
+	// Envia para o Chatwoot
+	url := fmt.Sprintf("%s/api/v1/accounts/%s/conversations", cfg.URL, cfg.AccountID)
+	req, _ := http.NewRequest("POST", url, body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("api_access_token", cfg.Token)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Printf("Erro upload Chatwoot: %v\n", err)
+		return
+	}
+	defer resp.Body.Close()
+}
+
+// --- WEBHOOK: CHATWOOT -> WHATSAPP (TEXTO E MÍDIA) ---
 
 func (s *server) HandleChatwootWebhook() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token := r.URL.Query().Get("token")
-		if token == "" { sendJsonError(w, "Token necessário", http.StatusUnauthorized); return }
+		if token == "" { w.WriteHeader(http.StatusOK); return }
 		
 		var payload CwWebhook
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil { w.WriteHeader(http.StatusOK); return }
 		
+		// Filtro de segurança
 		if payload.Event != "message_created" || payload.MessageType != "outgoing" { w.WriteHeader(http.StatusOK); return }
 		
-		// Carrega config para checar assinatura
+		// Carrega config
 		cwCfgMutex.RLock()
 		cfg := cwCfg
 		cwCfgMutex.RUnlock()
 
 		userInfo, found := userinfocache.Get(token)
 		if !found { w.WriteHeader(http.StatusOK); return }
-		
 		w.WriteHeader(http.StatusOK)
 		
 		go func() {
@@ -380,27 +404,89 @@ func (s *server) HandleChatwootWebhook() http.HandlerFunc {
 			if !ok { return }
 			userID := vals.Get("Id")
 			client := clientManager.GetWhatsmeowClient(userID)
-			if client != nil && client.IsConnected() {
-				phone := payload.Conversation.Contact.PhoneNumber
-				if phone == "" { phone = payload.Conversation.ContactInbox.SourceID }
-				phone = strings.Replace(phone, "+", "", -1)
-				phone = strings.Replace(phone, " ", "", -1)
-				phone = strings.TrimSpace(phone)
-				if len(phone) < 8 { return }
+			if client == nil || !client.IsConnected() { return }
 
-				// LÓGICA DE ASSINATURA
+			// Recupera número
+			phone := payload.Conversation.Contact.PhoneNumber
+			if phone == "" { phone = payload.Conversation.ContactInbox.SourceID }
+			phone = strings.ReplaceAll(phone, "+", "")
+			phone = strings.ReplaceAll(phone, " ", "")
+			if len(phone) < 8 { return }
+			jid, _ := parseJID(phone)
+
+			// 1. ENVIO DE MÍDIA (SE HOUVER)
+			if len(payload.Attachments) > 0 {
+				for _, att := range payload.Attachments {
+					sendChatwootMedia(client, jid, att)
+				}
+			} else {
+				// 2. ENVIO DE TEXTO (SE NÃO TIVER MÍDIA)
 				finalMessage := payload.Content
 				if cfg.SignMessages && payload.Sender.Name != "" {
-					delimiter := cfg.SignatureDelimiter
-					if delimiter == "" { delimiter = "\n" }
-					// Processa caracteres de escape como \n
-					delimiter = strings.ReplaceAll(delimiter, `\n`, "\n")
+					delimiter := strings.ReplaceAll(cfg.SignatureDelimiter, `\n`, "\n")
 					finalMessage = fmt.Sprintf("%s%s%s", finalMessage, delimiter, payload.Sender.Name)
 				}
-
-				jid, _ := parseJID(phone)
-				client.SendMessage(context.Background(), jid, &waE2E.Message{Conversation: proto.String(finalMessage)})
+				if finalMessage != "" {
+					client.SendMessage(context.Background(), jid, &waE2E.Message{Conversation: proto.String(finalMessage)})
+				}
 			}
 		}()
 	}
+}
+
+// Função auxiliar para baixar e enviar mídia do Chatwoot
+func sendChatwootMedia(client *whatsmeow.Client, jid any, att CwAttachment) {
+	// Baixa o arquivo
+	resp, err := http.Get(att.DataUrl)
+	if err != nil { return }
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+
+	// Identifica tipo e envia
+	uploadResp, err := client.Upload(context.Background(), data, whatsmeow.MediaImage) // Default image, pode ajustar
+	if err != nil { return }
+
+	switch att.FileType {
+	case "image":
+		msg := &waE2E.ImageMessage{
+			Url:           proto.String(uploadResp.URL),
+			DirectPath:    proto.String(uploadResp.DirectPath),
+			MediaKey:      uploadResp.MediaKey,
+			Mimetype:      proto.String(http.DetectContentType(data)),
+			FileEncSha256: uploadResp.FileEncSHA256,
+			FileSha256:    uploadResp.FileSHA256,
+			FileLength:    proto.Uint64(uint64(len(data))),
+		}
+		client.SendMessage(context.Background(), jid, &waE2E.Message{ImageMessage: msg})
+	case "audio":
+		msg := &waE2E.AudioMessage{
+			Url:           proto.String(uploadResp.URL),
+			DirectPath:    proto.String(uploadResp.DirectPath),
+			MediaKey:      uploadResp.MediaKey,
+			Mimetype:      proto.String("audio/ogg; codecs=opus"), // WhatsApp gosta de opus
+			FileEncSha256: uploadResp.FileEncSHA256,
+			FileSha256:    uploadResp.FileSHA256,
+			FileLength:    proto.Uint64(uint64(len(data))),
+			Ptt:           proto.Bool(true), // Envia como nota de voz
+		}
+		client.SendMessage(context.Background(), jid, &waE2E.Message{AudioMessage: msg})
+	default:
+		// Documento Genérico
+		msg := &waE2E.DocumentMessage{
+			Url:           proto.String(uploadResp.URL),
+			DirectPath:    proto.String(uploadResp.DirectPath),
+			MediaKey:      uploadResp.MediaKey,
+			Mimetype:      proto.String(http.DetectContentType(data)),
+			FileEncSha256: uploadResp.FileEncSHA256,
+			FileSha256:    uploadResp.FileSHA256,
+			FileLength:    proto.Uint64(uint64(len(data))),
+			FileName:      proto.String(filepath.Base(att.DataUrl)),
+		}
+		client.SendMessage(context.Background(), jid, &waE2E.Message{DocumentMessage: msg})
+	}
+}
+
+// Configura o TLS para downloads seguros se necessário
+func init() {
+	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 }

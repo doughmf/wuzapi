@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,6 +16,7 @@ import (
 
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/types"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -49,8 +49,6 @@ const configFile = "chatwoot.json"
 
 func init() {
 	loadConfig()
-	// Ignora erro de certificado SSL para downloads de mídia
-	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 }
 
 func loadConfig() {
@@ -211,8 +209,6 @@ func (s *server) HandleAutoCreateInbox() http.HandlerFunc {
 
 		cfg := body.Config
 		cfg.URL = strings.TrimSuffix(cfg.URL, "/")
-		
-		// Configura o webhook com o token da sessão
 		webhookEndpoint := fmt.Sprintf("%s/chatwoot/webhook?token=%s", body.WuzapiURL, body.SessionToken)
 
 		cwPayload := CreateInboxRequest{
@@ -286,7 +282,7 @@ func getOrCreateContact(baseURL, accountID, token string, inboxID int, phone, na
 		"inbox_id":     inboxID,
 		"name":         name,
 		"phone_number": phone,
-		"source_id":    phone, // Importante para o mapeamento
+		"source_id":    phone,
 	}
 	jsonPayload, _ := json.Marshal(payload)
 	reqCreate, _ := http.NewRequest("POST", createURL, bytes.NewBuffer(jsonPayload))
@@ -347,7 +343,6 @@ func SendToChatwoot(pushName string, senderUser string, text string) {
 	}
 }
 
-// Função para envio de anexos (Disponível para uso futuro no client.go)
 func SendAttachmentToChatwoot(pushName, senderUser, caption, fileName string, fileData []byte) {
 	cwCfgMutex.RLock()
 	cfg := cwCfg
@@ -416,7 +411,6 @@ func (s *server) HandleChatwootWebhook() http.HandlerFunc {
 		cfg := cwCfg
 		cwCfgMutex.RUnlock()
 
-		// Busca sessão pelo token
 		userInfo, found := userinfocache.Get(token)
 		if !found {
 			fmt.Printf("[Chatwoot] Erro: Sessão não encontrada para o token %s\n", token)
@@ -437,7 +431,7 @@ func (s *server) HandleChatwootWebhook() http.HandlerFunc {
 				return
 			}
 
-			// Recupera telefone
+			// Recupera telefone e faz parse seguro usando types do whatsmeow
 			phone := payload.Conversation.Contact.PhoneNumber
 			if phone == "" {
 				phone = payload.Conversation.ContactInbox.SourceID
@@ -447,7 +441,17 @@ func (s *server) HandleChatwootWebhook() http.HandlerFunc {
 			if len(phone) < 8 {
 				return
 			}
-			jid, _ := parseJID(phone)
+			
+			// PARSE JID SEGURO
+			jid, err := types.ParseJID(phone)
+			if err != nil {
+				// Tenta adicionar o sufixo padrão se falhar
+				jid, err = types.ParseJID(phone + "@s.whatsapp.net")
+				if err != nil {
+					fmt.Println("[Chatwoot] Erro ao parsear JID:", err)
+					return
+				}
+			}
 
 			// 1. Envio de Mídia
 			if len(payload.Attachments) > 0 {
@@ -469,7 +473,7 @@ func (s *server) HandleChatwootWebhook() http.HandlerFunc {
 	}
 }
 
-func sendChatwootMedia(client *whatsmeow.Client, jid any, att CwAttachment) {
+func sendChatwootMedia(client *whatsmeow.Client, jid types.JID, att CwAttachment) {
 	resp, err := http.Get(att.DataUrl)
 	if err != nil {
 		return

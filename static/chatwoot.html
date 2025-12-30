@@ -7,9 +7,8 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fomantic-ui@2.9.4/dist/semantic.min.css">
   <style>
       body { background-color: #f4f6f9; display: flex; justify-content: center; padding-top: 50px; }
-      .main-container { width: 100%; max-width: 650px; }
-      .ui.raised.segment { box-shadow: 0 4px 12px rgba(0,0,0,0.1); border: none; }
-      .ui.form .field > label { color: #555; }
+      .main-container { width: 100%; max-width: 600px; }
+      .ui.card { width: 100%; }
   </style>
 </head>
 <body>
@@ -25,34 +24,26 @@
 
       <form class="ui form" id="configForm">
         
-        <h4 class="ui dividing header" style="color: #a333c8;">1. Autenticação Wuzapi</h4>
-        <div class="two fields">
-            <div class="field">
-                <label>Admin Token</label>
-                <input type="password" id="wuzapi_token" placeholder="Token do .env">
-            </div>
-            <div class="field required">
-                <label>Instance Token (Sessão)</label>
-                <input type="text" id="session_token" placeholder="Ex: 1234ABCD">
-                <small style="color:gray; font-size: 0.8em;">Token usado para ler o QR Code.</small>
-            </div>
+        <h4 class="ui dividing header" style="color: #a333c8;">1. Credenciais Wuzapi</h4>
+        <div class="field">
+            <label>Admin Token</label>
+            <input type="password" id="wuzapi_token" placeholder="Token de Admin do Wuzapi">
+        </div>
+        <div class="field required">
+            <label>Instance Token (Sessão Conectada)</label>
+            <input type="text" id="session_token" placeholder="Ex: 1234ABCD">
+            <small style="color:gray">Token da instância que está lendo o QR Code.</small>
         </div>
 
-        <h4 class="ui dividing header" style="color: #00b5ad;">2. Conexão Chatwoot</h4>
+        <h4 class="ui dividing header" style="color: #00b5ad;">2. Dados Chatwoot</h4>
         <div class="field">
-            <label>Chatwoot URL</label>
-            <div class="ui left icon input">
-                <i class="globe icon"></i>
-                <input type="text" id="cw_url" placeholder="Ex: https://app.chatwoot.com">
-            </div>
+            <label>URL do Painel</label>
+            <input type="text" id="cw_url" placeholder="https://app.seudominio.com">
         </div>
 
         <div class="field">
-            <label>User Access Token (Chatwoot)</label>
-            <div class="ui left icon input">
-                <i class="key icon"></i>
-                <input type="password" id="cw_token" placeholder="Token do seu Perfil no Chatwoot">
-            </div>
+            <label>User Access Token</label>
+            <input type="password" id="cw_token" placeholder="Token do Perfil do Usuário">
         </div>
 
         <div class="field">
@@ -60,41 +51,33 @@
             <input type="number" id="cw_account_id" placeholder="Ex: 1">
         </div>
 
-        <h4 class="ui dividing header" style="color: #2185d0;">3. Caixa de Entrada</h4>
+        <h4 class="ui dividing header" style="color: #2185d0;">3. Configuração da Caixa</h4>
         
         <div class="field required">
-            <label>Nome da Caixa de Entrada (Para Criação)</label>
-            <div class="ui left icon input">
-                <i class="tag icon"></i>
-                <input type="text" id="inbox_name" placeholder="Ex: Wuzapi Bot, Setor Comercial..." value="Wuzapi Bot">
+            <label>Nome da Caixa de Entrada</label>
+            <div class="ui action input">
+                <input type="text" id="inbox_name" placeholder="Ex: Atendimento WhatsApp" value="WhatsApp Comercial">
+                <button type="button" class="ui teal button" onclick="autoCreate()">
+                    <i class="magic icon"></i> Criar Automático
+                </button>
             </div>
-            <small>Este nome será usado para criar a caixa no Chatwoot.</small>
+            <small>Digite um nome e clique em "Criar" para gerar a caixa e o webhook.</small>
+        </div>
+
+        <div class="field">
+            <label>Inbox ID (Resultado)</label>
+            <input type="text" id="cw_inbox_id" readonly placeholder="O ID aparecerá aqui..." style="background-color: #f8f8f8;">
         </div>
 
         <div class="ui divider"></div>
 
-        <div class="field">
-             <div class="ui two buttons">
-                 <button type="button" class="ui teal button" onclick="autoCreate()">
-                    <i class="magic icon"></i> Criar Caixa Automática
-                </button>
-                <button type="button" class="ui purple button" onclick="saveConfig()">
-                    <i class="save icon"></i> Salvar Manualmente
-                </button>
-             </div>
-        </div>
-        
-        <div class="field">
-            <label>Inbox ID (Resultado/Config Atual)</label>
-            <input type="text" id="cw_inbox_id" readonly placeholder="O ID aparecerá aqui após criar" style="background: #eee;">
-        </div>
-
         <div class="ui error message" id="errorMessage"></div>
         <div class="ui success message" id="successMessage"></div>
         
-        <button type="button" class="ui basic button fluid" onclick="window.location.href='/dashboard'">
-            <i class="arrow left icon"></i> Voltar ao Dashboard
-        </button>
+        <div class="two ui buttons">
+            <button type="button" class="ui basic button" onclick="window.location.href='/dashboard'">Voltar</button>
+            <button type="button" class="ui purple button" onclick="saveConfig()">Salvar Manualmente</button>
+        </div>
       </form>
     </div>
   </div>
@@ -113,12 +96,11 @@
         const form = $('#configForm');
         form.removeClass('error success loading');
         
-        // Coleta dados
+        // Validação
         const name = document.getElementById('inbox_name').value;
         const sessionToken = document.getElementById('session_token').value;
         const adminToken = document.getElementById('wuzapi_token').value;
 
-        // Validação Simples
         if(!name || !sessionToken || !adminToken) {
             $('#errorMessage').text("Preencha: Admin Token, Instance Token e Nome da Caixa.");
             form.addClass('error');
@@ -132,7 +114,7 @@
             token: document.getElementById('cw_token').value,
             account_id: document.getElementById('cw_account_id').value,
             session_token: sessionToken,
-            name: name, // Envia o nome digitado
+            name: name, // Envia o nome para criar
             wuzapi_url: window.location.origin
         };
 
@@ -145,20 +127,16 @@
             const data = await res.json();
 
             if (res.ok) {
-                // Atualiza o ID na tela
                 document.getElementById('cw_inbox_id').value = data.inbox_id;
-                
                 $('#successMessage').html(`<div class="header">Sucesso!</div><p>${data.message}</p>`);
                 form.addClass('success');
-                
-                // Salva token admin para facilitar
                 localStorage.setItem('wuzapi_admin_token', adminToken);
             } else {
-                $('#errorMessage').text(data.error || "Erro desconhecido ao criar caixa.");
+                $('#errorMessage').text(data.error || "Erro desconhecido.");
                 form.addClass('error');
             }
         } catch (e) {
-            $('#errorMessage').text("Erro de conexão ou JSON inválido recebido.");
+            $('#errorMessage').text("Erro de conexão com o servidor.");
             form.addClass('error');
         } finally {
             form.removeClass('loading');
@@ -188,13 +166,12 @@
             account_id: document.getElementById('cw_account_id').value,
             inbox_id: document.getElementById('cw_inbox_id').value
         };
-        
         await fetch('/chatwoot/config', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': adminToken },
             body: JSON.stringify(payload)
         });
-        alert("Configuração Salva Manualmente!");
+        alert("Salvo!");
     }
   </script>
 </body>

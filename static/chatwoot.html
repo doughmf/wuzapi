@@ -3,108 +3,69 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Chatwoot Config - WuzAPI</title>
+  <title>Chatwoot Config</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fomantic-ui@2.9.4/dist/semantic.min.css">
   <style>
-      body { background-color: #f4f6f9; }
-      .main-container { margin-top: 50px; max-width: 700px !important; }
-      .ui.card { width: 100%; }
-      .or-divider { margin: 20px 0; text-align: center; position: relative; }
-      .or-divider:before { content: ""; position: absolute; top: 50%; left: 0; right: 0; border-top: 1px solid #ddd; z-index: 0; }
-      .or-divider span { background: #fff; padding: 0 10px; position: relative; z-index: 1; color: #777; font-size: 0.9em; }
+      body { background-color: #f4f6f9; display: flex; justify-content: center; padding-top: 50px; }
+      .main-container { width: 100%; max-width: 600px; }
   </style>
 </head>
 <body>
 
-  <div class="ui fixed menu borderless">
-    <div class="ui container">
-      <a href="/dashboard" class="header item">
-        <i class="whatsapp icon"></i> WuzAPI Manager
-      </a>
-      <div class="right menu">
-        <a href="/dashboard" class="item"><i class="arrow left icon"></i> Back to Dashboard</a>
-      </div>
-    </div>
-  </div>
-  
-  <div style="height:60px;"></div>
+  <div class="main-container">
+    <div class="ui raised segment">
+      <h2 class="ui header center aligned">
+        <i class="comments icon purple"></i>
+        <div class="content">Chatwoot Integration</div>
+      </h2>
+      
+      <div class="ui divider"></div>
 
-  <div class="ui container main-container">
-    <div class="ui raised card">
-      <div class="content">
-        <div class="ui purple right ribbon label">Config</div>
-        <div class="center aligned header">
-          <i class="comments icon" style="color: #a333c8; font-size: 2em; margin-bottom: 10px;"></i><br>
-          Chatwoot Integration
+      <form class="ui form" id="configForm">
+        <div class="field">
+            <label>Admin Token (Wuzapi)</label>
+            <input type="password" id="wuzapi_token" placeholder="Seu Token de Admin">
         </div>
-      </div>
 
-      <div class="content">
-        <form class="ui form" id="configForm">
-            
-            <div class="ui message warning">
-                <div class="field">
-                    <label><i class="lock icon"></i> Wuzapi Admin Token</label>
-                    <div class="ui action input">
-                        <input type="password" id="wuzapi_token" placeholder="Required for all actions">
-                    </div>
-                </div>
-            </div>
+        <div class="field">
+            <label>Chatwoot URL</label>
+            <input type="text" id="cw_url" placeholder="https://app.seudominio.com">
+        </div>
 
-            <h4 class="ui dividing header">Connection Details</h4>
+        <div class="field">
+            <label>User Access Token (Chatwoot)</label>
+            <input type="password" id="cw_token" placeholder="Token do Perfil do Usuário">
+        </div>
 
-            <div class="field">
-                <label>Chatwoot URL</label>
-                <div class="ui left icon input">
-                    <i class="globe icon"></i>
-                    <input type="text" id="cw_url" placeholder="https://app.chatwoot.com">
-                </div>
-            </div>
+        <div class="field">
+            <label>Account ID</label>
+            <input type="number" id="cw_account_id" placeholder="Ex: 1">
+        </div>
 
-            <div class="field">
-                <label>User Access Token</label>
-                <div class="ui left icon input">
-                    <i class="key icon"></i>
-                    <input type="password" id="cw_token" placeholder="Your Chatwoot User Token">
-                </div>
-            </div>
+        <div class="ui divider"></div>
 
-            <div class="two fields">
-                <div class="field">
-                    <label>Account ID</label>
-                    <input type="number" id="cw_account_id" placeholder="Ex: 1">
-                </div>
-                <div class="field">
-                    <label>Inbox ID</label>
-                    <div class="ui action input">
-                        <input type="number" id="cw_inbox_id" placeholder="Ex: 3">
-                    </div>
-                </div>
-            </div>
-
-            <div class="field">
-                 <button type="button" class="ui teal fluid button" onclick="autoCreate()">
-                    <i class="magic icon"></i> Create Inbox Automatically
+        <div class="field">
+             <label>Opções</label>
+             <div class="ui two buttons">
+                 <button type="button" class="ui teal button" onclick="autoCreate()">
+                    <i class="magic icon"></i> Criar Caixa Automática
                 </button>
-                <small style="color: #666; display: block; text-align: center; margin-top: 5px;">
-                    This will create an API Inbox named "Wuzapi" in Chatwoot and configure the Webhook automatically.
-                </small>
-            </div>
-
-            <div class="ui divider"></div>
-
-            <div class="ui error message" id="errorMessage"></div>
-            <div class="ui success message" id="successMessage"></div>
-
-        </form>
-      </div>
-
-      <div class="extra content">
-        <div class="ui two buttons">
-            <button class="ui basic button" onclick="loadConfig()">Load Current</button>
-            <button class="ui purple button" onclick="saveConfig()">Save Manual</button>
+                <button type="button" class="ui purple button" onclick="saveConfig()">
+                    <i class="save icon"></i> Salvar Manualmente
+                </button>
+             </div>
         </div>
-      </div>
+        
+        <div class="field">
+            <label>Inbox ID (Gerado)</label>
+            <input type="text" id="cw_inbox_id" readonly placeholder="Será preenchido automaticamente">
+        </div>
+
+        <div class="ui error message" id="errorMessage"></div>
+        <div class="ui success message" id="successMessage"></div>
+        
+        <button type="button" class="ui basic button fluid" onclick="window.location.href='/dashboard'">Voltar ao Dashboard</button>
+      </form>
     </div>
   </div>
 
@@ -114,131 +75,82 @@
   <script>
     document.addEventListener('DOMContentLoaded', () => {
         const savedToken = localStorage.getItem('wuzapi_admin_token');
-        if(savedToken) {
-            document.getElementById('wuzapi_token').value = savedToken;
-            loadConfig();
-        }
+        if(savedToken) document.getElementById('wuzapi_token').value = savedToken;
+        loadConfig();
     });
 
-    // Função para criar caixa automaticamente (Estilo Evolution)
     async function autoCreate() {
         const form = $('#configForm');
-        const adminToken = document.getElementById('wuzapi_token').value;
-        
-        // Dados necessários
-        const url = document.getElementById('cw_url').value;
-        const token = document.getElementById('cw_token').value;
-        const accountId = document.getElementById('cw_account_id').value;
-
-        form.removeClass('error success');
-
-        if (!adminToken || !url || !token || !accountId) {
-            form.addClass('error');
-            $('#errorMessage').text("Please fill Admin Token, Chatwoot URL, User Token and Account ID first.");
-            return;
-        }
-
+        form.removeClass('error success loading');
         form.addClass('loading');
+        
+        const payload = {
+            url: document.getElementById('cw_url').value,
+            token: document.getElementById('cw_token').value,
+            account_id: document.getElementById('cw_account_id').value,
+            name: "Wuzapi Bot",
+            wuzapi_url: window.location.origin
+        };
+        
+        const adminToken = document.getElementById('wuzapi_token').value;
 
         try {
-            const response = await fetch('/chatwoot/auto-create', {
+            const res = await fetch('/chatwoot/auto-create', {
                 method: 'POST',
-                headers: {
-                    'Authorization': adminToken,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    url: url,
-                    token: token,
-                    account_id: accountId,
-                    name: "Wuzapi Bot", // Nome da caixa
-                    wuzapi_url: window.location.origin // Envia a URL atual do Wuzapi
-                })
+                headers: { 'Content-Type': 'application/json', 'Authorization': adminToken },
+                body: JSON.stringify(payload)
             });
+            const data = await res.json();
 
-            const data = await response.json();
-
-            if (response.ok) {
-                // Preenche o ID automaticamente
+            if (res.ok) {
                 document.getElementById('cw_inbox_id').value = data.inbox_id;
-                
-                $('#successMessage').html(`<div class="header">Success!</div><p>${data.message}</p>`);
+                $('#successMessage').html(`<div class="header">Sucesso!</div><p>${data.message}</p>`);
                 form.addClass('success');
                 localStorage.setItem('wuzapi_admin_token', adminToken);
             } else {
+                $('#errorMessage').text(data.error || "Erro desconhecido");
                 form.addClass('error');
-                $('#errorMessage').text(data.error || "Failed to create inbox.");
             }
         } catch (e) {
+            $('#errorMessage').text("Erro de conexão com o servidor.");
             form.addClass('error');
-            $('#errorMessage').text("Connection error: " + e.message);
         } finally {
             form.removeClass('loading');
         }
     }
 
     async function loadConfig() {
-        // ... (código anterior de load) ...
         const adminToken = document.getElementById('wuzapi_token').value;
-        if (!adminToken) return;
+        if(!adminToken) return;
         try {
-            const response = await fetch('/chatwoot/config', {
-                method: 'GET',
-                headers: { 'Authorization': adminToken }
-            });
-            if (response.ok) {
-                const data = await response.json();
+            const res = await fetch('/chatwoot/config', { headers: { 'Authorization': adminToken } });
+            if(res.ok) {
+                const data = await res.json();
                 document.getElementById('cw_url').value = data.url || '';
                 document.getElementById('cw_token').value = data.token || '';
                 document.getElementById('cw_account_id').value = data.account_id || '';
                 document.getElementById('cw_inbox_id').value = data.inbox_id || '';
-                localStorage.setItem('wuzapi_admin_token', adminToken);
             }
-        } catch (e) {}
+        } catch(e){}
     }
-
+    
     async function saveConfig() {
-        // ... (código anterior de save) ...
+        // Lógica de salvamento manual simplificada (já implementada no autoCreate implicitamente ao salvar no disco)
+        // Mas se quiser salvar sem criar:
         const adminToken = document.getElementById('wuzapi_token').value;
-        const form = $('#configForm');
-        form.removeClass('error success');
+        const payload = {
+            url: document.getElementById('cw_url').value,
+            token: document.getElementById('cw_token').value,
+            account_id: document.getElementById('cw_account_id').value,
+            inbox_id: document.getElementById('cw_inbox_id').value
+        };
         
-        if (!adminToken) {
-            form.addClass('error');
-            $('#errorMessage').text("Admin Token required.");
-            return;
-        }
-        form.addClass('loading');
-
-        try {
-            const response = await fetch('/chatwoot/config', {
-                method: 'POST',
-                headers: {
-                    'Authorization': adminToken,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    url: document.getElementById('cw_url').value,
-                    token: document.getElementById('cw_token').value,
-                    account_id: document.getElementById('cw_account_id').value,
-                    inbox_id: document.getElementById('cw_inbox_id').value
-                })
-            });
-
-            if (response.ok) {
-                form.addClass('success');
-                $('#successMessage').html('<div class="header">Saved!</div>');
-                localStorage.setItem('wuzapi_admin_token', adminToken);
-            } else {
-                form.addClass('error');
-                $('#errorMessage').text("Error saving config.");
-            }
-        } catch (e) {
-            form.addClass('error');
-            $('#errorMessage').text("Connection error.");
-        } finally {
-            form.removeClass('loading');
-        }
+        await fetch('/chatwoot/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': adminToken },
+            body: JSON.stringify(payload)
+        });
+        alert("Salvo!");
     }
   </script>
 </body>

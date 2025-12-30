@@ -15,8 +15,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// --- ESTRUTURAS DE DADOS ---
-
+// --- ESTRUTURAS ---
 type ChatwootSearchResponse struct {
 	Payload []struct {
 		ID int `json:"id"`
@@ -42,8 +41,7 @@ type CwWebhook struct {
 	} `json:"conversation"`
 }
 
-// --- ENVIAR PARA CHATWOOT (Wuzapi -> Chatwoot) ---
-
+// --- ENVIAR (Wuzapi -> Chatwoot) ---
 func SendToChatwoot(pushName string, senderUser string, text string) {
 	cwURL := strings.TrimSpace(os.Getenv("CHATWOOT_URL"))
 	cwToken := strings.TrimSpace(os.Getenv("CHATWOOT_TOKEN"))
@@ -51,19 +49,19 @@ func SendToChatwoot(pushName string, senderUser string, text string) {
 	cwInboxIDStr := strings.TrimSpace(os.Getenv("CHATWOOT_INBOX_ID"))
 
 	if cwURL == "" || cwToken == "" {
-		fmt.Println("[Chatwoot] ERRO: Integração não configurada.")
+		fmt.Println("[Chatwoot] ERRO: Variáveis de ambiente não configuradas.")
 		return
 	}
 
 	cwInboxID, _ := strconv.Atoi(cwInboxIDStr)
-	// Remove o + se já vier com ele para garantir limpeza, depois adiciona
+	// Limpa o número e garante o formato +55...
 	phoneClean := strings.Replace(senderUser, "+", "", -1)
 	phoneNumber := "+" + phoneClean
 
-	// 1. Busca ou Cria o Contato (Obrigatório para Chatwoot 4.9+)
+	// 1. Busca ou Cria o Contato (Essencial para corrigir o erro 404 no Chatwoot 4.9+)
 	contactID := getOrCreateContact(cwURL, cwAccountID, cwToken, cwInboxID, phoneNumber, pushName)
 	if contactID == 0 {
-		fmt.Println("[Chatwoot] Falha ao obter ID do contato.")
+		fmt.Println("[Chatwoot] Falha ao obter ID do contato. Cancelando envio.")
 		return
 	}
 
@@ -72,7 +70,7 @@ func SendToChatwoot(pushName string, senderUser string, text string) {
 }
 
 func getOrCreateContact(baseURL, accountID, token string, inboxID int, phone, name string) int {
-	// Tenta buscar
+	// A. Busca contato existente
 	searchURL := fmt.Sprintf("%s/api/v1/accounts/%s/contacts/search?q=%s", baseURL, accountID, strings.Replace(phone, "+", "%2B", -1))
 	req, _ := http.NewRequest("GET", searchURL, nil)
 	req.Header.Set("api_access_token", token)
@@ -90,7 +88,7 @@ func getOrCreateContact(baseURL, accountID, token string, inboxID int, phone, na
 		}
 	}
 
-	// Se não achou, cria
+	// B. Cria novo contato se não achar
 	createURL := fmt.Sprintf("%s/api/v1/accounts/%s/contacts", baseURL, accountID)
 	payload := map[string]interface{}{
 		"inbox_id":     inboxID,
@@ -105,7 +103,7 @@ func getOrCreateContact(baseURL, accountID, token string, inboxID int, phone, na
 
 	respCreate, err := client.Do(reqCreate)
 	if err != nil {
-		fmt.Printf("[Chatwoot] Erro criando contato: %v\n", err)
+		fmt.Printf("[Chatwoot] Erro de conexão ao criar contato: %v\n", err)
 		return 0
 	}
 	defer respCreate.Body.Close()
@@ -116,6 +114,8 @@ func getOrCreateContact(baseURL, accountID, token string, inboxID int, phone, na
 		json.Unmarshal(body, &contactRes)
 		return contactRes.Payload.Contact.ID
 	}
+	
+	fmt.Printf("[Chatwoot] Erro ao criar contato (HTTP %d)\n", respCreate.StatusCode)
 	return 0
 }
 
@@ -130,6 +130,7 @@ func sendConversation(baseURL, accountID, token string, inboxID, contactID int, 
 			"message_type": "incoming",
 		},
 	}
+
 	jsonPayload, _ := json.Marshal(payload)
 	req, _ := http.NewRequest("POST", url, bytes.NewBuffer(jsonPayload))
 	req.Header.Set("Content-Type", "application/json")
@@ -143,20 +144,19 @@ func sendConversation(baseURL, accountID, token string, inboxID, contactID int, 
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		fmt.Printf("[Chatwoot] Mensagem enviada para contato %d\n", contactID)
+		fmt.Printf("[Chatwoot] Mensagem enviada com sucesso para ID %d\n", contactID)
 	} else {
 		body, _ := io.ReadAll(resp.Body)
-		fmt.Printf("[Chatwoot] Erro %d: %s\n", resp.StatusCode, string(body))
+		fmt.Printf("[Chatwoot] FALHA NO ENVIO (Erro %d): %s\n", resp.StatusCode, string(body))
 	}
 }
 
-// --- RECEBER DO CHATWOOT (Chatwoot -> Wuzapi) ---
-
+// --- RECEBER (Chatwoot -> Wuzapi) ---
 func (s *server) HandleChatwootWebhook() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token := r.URL.Query().Get("token")
 		if token == "" {
-			http.Error(w, "Token obrigatório", http.StatusUnauthorized)
+			http.Error(w, "Token necessario", http.StatusUnauthorized)
 			return
 		}
 
@@ -165,17 +165,17 @@ func (s *server) HandleChatwootWebhook() http.HandlerFunc {
 			return
 		}
 
-		// Filtra apenas mensagens enviadas pelo agente (outgoing) e que sejam texto criado
+		// Só processa mensagens de SAÍDA (do agente para o cliente)
 		if payload.Event != "message_created" || payload.MessageType != "outgoing" {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
 
-		// Busca a sessão do usuário
+		// Valida sessão do Wuzapi
 		userInfo, found := userinfocache.Get(token)
 		if !found {
-			fmt.Println("[Webhook] Token inválido ou sessão não encontrada")
-			http.Error(w, "Sessão inválida", http.StatusUnauthorized)
+			fmt.Println("[Webhook] Token inválido")
+			http.Error(w, "Token invalido", http.StatusUnauthorized)
 			return
 		}
 		
@@ -185,15 +185,15 @@ func (s *server) HandleChatwootWebhook() http.HandlerFunc {
 		client := clientManager.GetWhatsmeowClient(userID)
 
 		if client == nil || !client.IsConnected() {
-			fmt.Println("[Webhook] WhatsApp desconectado")
+			fmt.Println("[Webhook] WhatsApp desconectado, não foi possível responder")
 			return
 		}
 
-		// Envia a mensagem
+		// Envia para o WhatsApp
 		phone := strings.Replace(payload.Conversation.ContactInbox.SourceID, "+", "", -1)
 		jid, _ := parseJID(phone)
 		
-		fmt.Printf("[Chatwoot -> WhatsApp] Enviando para %s: %s\n", phone, payload.Content)
+		fmt.Printf("[Chatwoot -> WhatsApp] Respondendo para %s: %s\n", phone, payload.Content)
 		client.SendMessage(context.Background(), jid, &waE2E.Message{
 			Conversation: proto.String(payload.Content),
 		})

@@ -10,7 +10,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -187,7 +186,6 @@ func (s *server) HandleGetChatwootConfig() http.HandlerFunc {
 
 // --- AUTO CRIAÇÃO ---
 func (s *server) HandleAutoCreateInbox() http.HandlerFunc {
-	// Wrapper para receber config + session_token
 	type Wrapper struct {
 		Config       ChatwootConfig `json:"config"`
 		SessionToken string         `json:"session_token"`
@@ -213,7 +211,6 @@ func (s *server) HandleAutoCreateInbox() http.HandlerFunc {
 		cfg := body.Config
 		cfg.URL = strings.TrimSuffix(cfg.URL, "/")
 		
-		// Configura o webhook com o token da sessão
 		webhookEndpoint := fmt.Sprintf("%s/chatwoot/webhook?token=%s", body.WuzapiURL, body.SessionToken)
 
 		cwPayload := CreateInboxRequest{
@@ -436,7 +433,6 @@ func (s *server) HandleChatwootWebhook() http.HandlerFunc {
 				return
 			}
 
-			// Recupera telefone e faz parse seguro usando types do whatsmeow
 			phone := payload.Conversation.Contact.PhoneNumber
 			if phone == "" {
 				phone = payload.Conversation.ContactInbox.SourceID
@@ -456,13 +452,11 @@ func (s *server) HandleChatwootWebhook() http.HandlerFunc {
 				}
 			}
 
-			// 1. Envio de Mídia
 			if len(payload.Attachments) > 0 {
 				for _, att := range payload.Attachments {
 					sendChatwootMedia(client, jid, att)
 				}
 			} else {
-				// 2. Envio de Texto
 				finalMessage := payload.Content
 				if cfg.SignMessages && payload.Sender.Name != "" {
 					delimiter := strings.ReplaceAll(cfg.SignatureDelimiter, `\n`, "\n")
@@ -489,7 +483,6 @@ func sendChatwootMedia(client *whatsmeow.Client, jid types.JID, att CwAttachment
 		return
 	}
 
-	// NOTA: Campos com letras maiúsculas para compatibilidade com versões novas do protobuf
 	switch att.FileType {
 	case "image":
 		msg := &waE2E.ImageMessage{

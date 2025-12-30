@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -49,6 +50,8 @@ const configFile = "chatwoot.json"
 
 func init() {
 	loadConfig()
+	// Ignora erro de certificado SSL para downloads de mídia
+	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 }
 
 func loadConfig() {
@@ -184,13 +187,13 @@ func (s *server) HandleGetChatwootConfig() http.HandlerFunc {
 
 // --- AUTO CRIAÇÃO ---
 func (s *server) HandleAutoCreateInbox() http.HandlerFunc {
+	// Wrapper para receber config + session_token
+	type Wrapper struct {
+		Config       ChatwootConfig `json:"config"`
+		SessionToken string         `json:"session_token"`
+		WuzapiURL    string         `json:"wuzapi_url"`
+	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Wrapper para receber config + session_token
-		type Wrapper struct {
-			Config       ChatwootConfig `json:"config"`
-			SessionToken string         `json:"session_token"`
-			WuzapiURL    string         `json:"wuzapi_url"`
-		}
 		var body Wrapper
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			sendJsonError(w, "JSON inválido", http.StatusBadRequest)
@@ -209,6 +212,8 @@ func (s *server) HandleAutoCreateInbox() http.HandlerFunc {
 
 		cfg := body.Config
 		cfg.URL = strings.TrimSuffix(cfg.URL, "/")
+		
+		// Configura o webhook com o token da sessão
 		webhookEndpoint := fmt.Sprintf("%s/chatwoot/webhook?token=%s", body.WuzapiURL, body.SessionToken)
 
 		cwPayload := CreateInboxRequest{
@@ -442,10 +447,8 @@ func (s *server) HandleChatwootWebhook() http.HandlerFunc {
 				return
 			}
 			
-			// PARSE JID SEGURO
 			jid, err := types.ParseJID(phone)
 			if err != nil {
-				// Tenta adicionar o sufixo padrão se falhar
 				jid, err = types.ParseJID(phone + "@s.whatsapp.net")
 				if err != nil {
 					fmt.Println("[Chatwoot] Erro ao parsear JID:", err)
@@ -486,38 +489,39 @@ func sendChatwootMedia(client *whatsmeow.Client, jid types.JID, att CwAttachment
 		return
 	}
 
+	// NOTA: Campos com letras maiúsculas para compatibilidade com versões novas do protobuf
 	switch att.FileType {
 	case "image":
 		msg := &waE2E.ImageMessage{
-			Url:           proto.String(uploadResp.URL),
+			URL:           proto.String(uploadResp.URL),
 			DirectPath:    proto.String(uploadResp.DirectPath),
 			MediaKey:      uploadResp.MediaKey,
 			Mimetype:      proto.String(http.DetectContentType(data)),
-			FileEncSha256: uploadResp.FileEncSHA256,
-			FileSha256:    uploadResp.FileSHA256,
+			FileEncSHA256: uploadResp.FileEncSHA256,
+			FileSHA256:    uploadResp.FileSHA256,
 			FileLength:    proto.Uint64(uint64(len(data))),
 		}
 		client.SendMessage(context.Background(), jid, &waE2E.Message{ImageMessage: msg})
 	case "audio":
 		msg := &waE2E.AudioMessage{
-			Url:           proto.String(uploadResp.URL),
+			URL:           proto.String(uploadResp.URL),
 			DirectPath:    proto.String(uploadResp.DirectPath),
 			MediaKey:      uploadResp.MediaKey,
 			Mimetype:      proto.String("audio/ogg; codecs=opus"),
-			FileEncSha256: uploadResp.FileEncSHA256,
-			FileSha256:    uploadResp.FileSHA256,
+			FileEncSHA256: uploadResp.FileEncSHA256,
+			FileSHA256:    uploadResp.FileSHA256,
 			FileLength:    proto.Uint64(uint64(len(data))),
-			Ptt:           proto.Bool(true),
+			PTT:           proto.Bool(true),
 		}
 		client.SendMessage(context.Background(), jid, &waE2E.Message{AudioMessage: msg})
 	default:
 		msg := &waE2E.DocumentMessage{
-			Url:           proto.String(uploadResp.URL),
+			URL:           proto.String(uploadResp.URL),
 			DirectPath:    proto.String(uploadResp.DirectPath),
 			MediaKey:      uploadResp.MediaKey,
 			Mimetype:      proto.String(http.DetectContentType(data)),
-			FileEncSha256: uploadResp.FileEncSHA256,
-			FileSha256:    uploadResp.FileSHA256,
+			FileEncSHA256: uploadResp.FileEncSHA256,
+			FileSHA256:    uploadResp.FileSHA256,
 			FileLength:    proto.Uint64(uint64(len(data))),
 			FileName:      proto.String("arquivo"),
 		}

@@ -10,12 +10,112 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"google.golang.org/protobuf/proto"
 )
 
 // --- ESTRUTURAS ---
+
+// Configuração do Chatwoot (Salva em arquivo)
+type ChatwootConfig struct {
+	URL       string `json:"url"`
+	Token     string `json:"token"`
+	AccountID string `json:"account_id"`
+	InboxID   string `json:"inbox_id"`
+}
+
+// Variável global para guardar a configuração na memória
+var (
+	cwCfg      ChatwootConfig
+	cwCfgMutex sync.RWMutex
+)
+
+// Nome do arquivo de configuração
+const configFile = "chatwoot.json"
+
+// Inicializa lendo do arquivo ou do ENV
+func init() {
+	loadConfig()
+}
+
+// Carrega configuração
+func loadConfig() {
+	cwCfgMutex.Lock()
+	defer cwCfgMutex.Unlock()
+
+	// 1. Tenta ler do arquivo JSON
+	file, err := os.Open(configFile)
+	if err == nil {
+		defer file.Close()
+		decoder := json.NewDecoder(file)
+		if err := decoder.Decode(&cwCfg); err == nil {
+			fmt.Println("[Chatwoot] Configuração carregada do arquivo chatwoot.json")
+			return
+		}
+	}
+
+	// 2. Se falhar, usa variáveis de ambiente (.env)
+	fmt.Println("[Chatwoot] Arquivo de config não encontrado, usando .env")
+	cwCfg = ChatwootConfig{
+		URL:       strings.TrimSpace(os.Getenv("CHATWOOT_URL")),
+		Token:     strings.TrimSpace(os.Getenv("CHATWOOT_TOKEN")),
+		AccountID: strings.TrimSpace(os.Getenv("CHATWOOT_ACCOUNT_ID")),
+		InboxID:   strings.TrimSpace(os.Getenv("CHATWOOT_INBOX_ID")),
+	}
+}
+
+// --- API: DEFINIR CONFIGURAÇÃO ---
+func (s *server) HandleSetChatwootConfig() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Valida Token Wuzapi
+		if r.Header.Get("Authorization") != os.Getenv("WUZAPI_ADMIN_TOKEN") {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		var newCfg ChatwootConfig
+		if err := json.NewDecoder(r.Body).Decode(&newCfg); err != nil {
+			http.Error(w, "JSON inválido", http.StatusBadRequest)
+			return
+		}
+
+		// Salva na memória
+		cwCfgMutex.Lock()
+		cwCfg = newCfg
+		cwCfgMutex.Unlock()
+
+		// Salva no arquivo
+		file, err := os.Create(configFile)
+		if err != nil {
+			http.Error(w, "Erro ao salvar arquivo", http.StatusInternalServerError)
+			return
+		}
+		defer file.Close()
+		json.NewEncoder(file).Encode(newCfg)
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "Configuração do Chatwoot atualizada com sucesso!"})
+	}
+}
+
+// --- API: LER CONFIGURAÇÃO ATUAL ---
+func (s *server) HandleGetChatwootConfig() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != os.Getenv("WUZAPI_ADMIN_TOKEN") {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		cwCfgMutex.RLock()
+		defer cwCfgMutex.RUnlock()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(cwCfg)
+	}
+}
+
+// --- INTEGRAÇÃO ---
+
 type ChatwootSearchResponse struct {
 	Payload []struct {
 		ID int `json:"id"`
@@ -43,27 +143,26 @@ type CwWebhook struct {
 
 // --- ENVIAR (Wuzapi -> Chatwoot) ---
 func SendToChatwoot(pushName string, senderUser string, text string) {
-	cwURL := strings.TrimSpace(os.Getenv("CHATWOOT_URL"))
-	cwToken := strings.TrimSpace(os.Getenv("CHATWOOT_TOKEN"))
-	cwAccountID := strings.TrimSpace(os.Getenv("CHATWOOT_ACCOUNT_ID"))
-	cwInboxIDStr := strings.TrimSpace(os.Getenv("CHATWOOT_INBOX_ID"))
+	cwCfgMutex.RLock()
+	cfg := cwCfg // Copia a config atual para uso local seguro
+	cwCfgMutex.RUnlock()
 
-	if cwURL == "" || cwToken == "" {
-		fmt.Println("[Chatwoot] ERRO: Variáveis de ambiente não configuradas.")
+	if cfg.URL == "" || cfg.Token == "" {
+		fmt.Println("[Chatwoot] ERRO: Integração não configurada (Use a API /chatwoot/config para configurar).")
 		return
 	}
 
-	cwInboxID, _ := strconv.Atoi(cwInboxIDStr)
+	cwInboxID, _ := strconv.Atoi(cfg.InboxID)
 	phoneClean := strings.Replace(senderUser, "+", "", -1)
 	phoneNumber := "+" + phoneClean
 
-	contactID := getOrCreateContact(cwURL, cwAccountID, cwToken, cwInboxID, phoneNumber, pushName)
+	contactID := getOrCreateContact(cfg.URL, cfg.AccountID, cfg.Token, cwInboxID, phoneNumber, pushName)
 	if contactID == 0 {
 		fmt.Println("[Chatwoot] Falha ao obter ID do contato.")
 		return
 	}
 
-	sendConversation(cwURL, cwAccountID, cwToken, cwInboxID, contactID, text)
+	sendConversation(cfg.URL, cfg.AccountID, cfg.Token, cwInboxID, contactID, text)
 }
 
 func getOrCreateContact(baseURL, accountID, token string, inboxID int, phone, name string) int {
@@ -134,25 +233,27 @@ func sendConversation(baseURL, accountID, token string, inboxID, contactID int, 
 		return
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		fmt.Printf("[Chatwoot] Mensagem enviada ao painel (ID %d)\n", contactID)
+		fmt.Printf("[Chatwoot] Mensagem enviada (ID %d)\n", contactID)
+	} else {
+		body, _ := io.ReadAll(resp.Body)
+		fmt.Printf("[Chatwoot] FALHA (Erro %d): %s\n", resp.StatusCode, string(body))
 	}
 }
 
-// --- RECEBER (Chatwoot -> Wuzapi) OTIMIZADO ---
+// --- RECEBER (Chatwoot -> Wuzapi) ---
 
 func (s *server) HandleChatwootWebhook() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token := r.URL.Query().Get("token")
 		if token == "" {
-			http.Error(w, "Token obrigatorio", http.StatusUnauthorized)
+			http.Error(w, "Token obrigatório", http.StatusUnauthorized)
 			return
 		}
 
 		var payload CwWebhook
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			// Responde OK mesmo se JSON for estranho para não travar o Chatwoot
 			w.WriteHeader(http.StatusOK) 
 			return
 		}
@@ -164,14 +265,14 @@ func (s *server) HandleChatwootWebhook() http.HandlerFunc {
 
 		userInfo, found := userinfocache.Get(token)
 		if !found {
-			http.Error(w, "Sessao invalida", http.StatusUnauthorized)
+			http.Error(w, "Sessão inválida", http.StatusUnauthorized)
 			return
 		}
 
-		// AQUI ESTÁ O TRUQUE: Responde o Chatwoot AGORA
+		// Responde OK rápido
 		w.WriteHeader(http.StatusOK)
 
-		// E processa o envio em segundo plano (Goroutine)
+		// Processa em background
 		go func() {
 			vals, ok := userInfo.(Values)
 			if !ok { return }
@@ -179,14 +280,14 @@ func (s *server) HandleChatwootWebhook() http.HandlerFunc {
 			client := clientManager.GetWhatsmeowClient(userID)
 
 			if client == nil || !client.IsConnected() {
-				fmt.Println("[Webhook] WhatsApp desconectado, fila de envio falhou")
+				fmt.Println("[Webhook] WhatsApp desconectado")
 				return
 			}
 
 			phone := strings.Replace(payload.Conversation.ContactInbox.SourceID, "+", "", -1)
 			jid, _ := parseJID(phone)
 			
-			fmt.Printf("[Chatwoot -> WhatsApp] Enviando em background para %s: %s\n", phone, payload.Content)
+			fmt.Printf("[Chatwoot -> WhatsApp] Enviando para %s: %s\n", phone, payload.Content)
 			client.SendMessage(context.Background(), jid, &waE2E.Message{
 				Conversation: proto.String(payload.Content),
 			})

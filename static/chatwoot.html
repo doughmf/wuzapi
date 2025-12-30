@@ -22,10 +22,19 @@
       <div class="ui divider"></div>
 
       <form class="ui form" id="configForm">
+        
         <div class="field">
             <label>Admin Token (Wuzapi)</label>
-            <input type="password" id="wuzapi_token" placeholder="Seu Token de Admin">
+            <input type="password" id="wuzapi_token" placeholder="dhmf...">
         </div>
+
+        <div class="field required">
+            <label>Wuzapi Instance Token</label>
+            <input type="text" id="session_token" placeholder="Ex: 1234ABCD" value="">
+            <small style="color:gray">Token da sessão do WhatsApp que enviará as mensagens (veja no Dashboard).</small>
+        </div>
+
+        <div class="ui divider"></div>
 
         <div class="field">
             <label>Chatwoot URL</label>
@@ -45,7 +54,6 @@
         <div class="ui divider"></div>
 
         <div class="field">
-             <label>Opções</label>
              <div class="ui two buttons">
                  <button type="button" class="ui teal button" onclick="autoCreate()">
                     <i class="magic icon"></i> Criar Caixa Automática
@@ -82,17 +90,25 @@
     async function autoCreate() {
         const form = $('#configForm');
         form.removeClass('error success loading');
-        form.addClass('loading');
         
         const payload = {
             url: document.getElementById('cw_url').value,
             token: document.getElementById('cw_token').value,
             account_id: document.getElementById('cw_account_id').value,
+            session_token: document.getElementById('session_token').value, // Envia o novo campo
             name: "Wuzapi Bot",
             wuzapi_url: window.location.origin
         };
         
         const adminToken = document.getElementById('wuzapi_token').value;
+
+        if(!payload.session_token) {
+            $('#errorMessage').text("Por favor, preencha o Instance Token.");
+            form.addClass('error');
+            return;
+        }
+
+        form.addClass('loading');
 
         try {
             const res = await fetch('/chatwoot/auto-create', {
@@ -135,8 +151,6 @@
     }
     
     async function saveConfig() {
-        // Lógica de salvamento manual simplificada (já implementada no autoCreate implicitamente ao salvar no disco)
-        // Mas se quiser salvar sem criar:
         const adminToken = document.getElementById('wuzapi_token').value;
         const payload = {
             url: document.getElementById('cw_url').value,

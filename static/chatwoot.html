@@ -6,79 +6,159 @@
   <title>Chatwoot Config</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fomantic-ui@2.9.4/dist/semantic.min.css">
   <style>
-      body { background-color: #f4f6f9; display: flex; justify-content: center; padding-top: 50px; }
-      .main-container { width: 100%; max-width: 600px; }
+      body { background-color: #f4f6f9; padding: 40px 0; }
+      .main-container { width: 100%; max-width: 800px; margin: 0 auto; }
       .ui.card { width: 100%; }
+      .section-title { color: #2185d0; margin-top: 20px !important; margin-bottom: 15px !important; }
+      .toggle-container { display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; }
+      .help-text { color: #888; font-size: 0.9em; margin-top: 5px; display: block; }
   </style>
 </head>
 <body>
 
   <div class="main-container">
-    <div class="ui raised segment">
-      <h2 class="ui header center aligned">
-        <i class="comments icon purple"></i>
-        <div class="content">Chatwoot Integration</div>
-      </h2>
+    <div class="ui raised card">
+      <div class="content">
+        <div class="header">
+            <img src="https://avatars.githubusercontent.com/u/64663960?s=200&v=4" style="width:30px; margin-right:10px; vertical-align:middle;">
+            Integração Chatwoot
+        </div>
+      </div>
       
-      <div class="ui divider"></div>
-
-      <form class="ui form" id="configForm">
-        
-        <h4 class="ui dividing header" style="color: #a333c8;">1. Credenciais Wuzapi</h4>
-        <div class="field">
-            <label>Admin Token</label>
-            <input type="password" id="wuzapi_token" placeholder="Token de Admin do Wuzapi">
-        </div>
-        <div class="field required">
-            <label>Instance Token (Sessão Conectada)</label>
-            <input type="text" id="session_token" placeholder="Ex: 1234ABCD">
-            <small style="color:gray">Token da instância que está lendo o QR Code.</small>
-        </div>
-
-        <h4 class="ui dividing header" style="color: #00b5ad;">2. Dados Chatwoot</h4>
-        <div class="field">
-            <label>URL do Painel</label>
-            <input type="text" id="cw_url" placeholder="https://app.seudominio.com">
-        </div>
-
-        <div class="field">
-            <label>User Access Token</label>
-            <input type="password" id="cw_token" placeholder="Token do Perfil do Usuário">
-        </div>
-
-        <div class="field">
-            <label>Account ID</label>
-            <input type="number" id="cw_account_id" placeholder="Ex: 1">
-        </div>
-
-        <h4 class="ui dividing header" style="color: #2185d0;">3. Configuração da Caixa</h4>
-        
-        <div class="field required">
-            <label>Nome da Caixa de Entrada</label>
-            <div class="ui action input">
-                <input type="text" id="inbox_name" placeholder="Ex: Atendimento WhatsApp" value="WhatsApp Comercial">
-                <button type="button" class="ui teal button" onclick="autoCreate()">
-                    <i class="magic icon"></i> Criar Automático
-                </button>
+      <div class="content">
+        <form class="ui form" id="configForm">
+            
+            <div class="field toggle-container">
+                <label>Ativo</label>
+                <div class="ui toggle checkbox">
+                    <input type="checkbox" id="enabled">
+                    <label>Ativar ou desativar o Chatwoot</label>
+                </div>
             </div>
-            <small>Digite um nome e clique em "Criar" para gerar a caixa e o webhook.</small>
-        </div>
 
-        <div class="field">
-            <label>Inbox ID (Resultado)</label>
-            <input type="text" id="cw_inbox_id" readonly placeholder="O ID aparecerá aqui..." style="background-color: #f8f8f8;">
-        </div>
+            <h4 class="ui dividing header section-title">Conexão</h4>
+            
+            <div class="field">
+                <label>URL do Chatwoot</label>
+                <input type="text" id="url" placeholder="https://app.seudominio.com.br">
+            </div>
 
-        <div class="ui divider"></div>
+            <div class="field">
+                <label>ID da Conta</label>
+                <input type="number" id="account_id" placeholder="Ex: 1">
+            </div>
 
-        <div class="ui error message" id="errorMessage"></div>
-        <div class="ui success message" id="successMessage"></div>
-        
-        <div class="two ui buttons">
-            <button type="button" class="ui basic button" onclick="window.location.href='/dashboard'">Voltar</button>
-            <button type="button" class="ui purple button" onclick="saveConfig()">Salvar Manualmente</button>
-        </div>
-      </form>
+            <div class="field">
+                <label>Token de Usuário</label>
+                <input type="password" id="token" placeholder="Token do perfil do usuário">
+            </div>
+
+            <div class="field required">
+                <label style="color:#d9534f">Wuzapi Instance Token (Obrigatório)</label>
+                <input type="text" id="session_token" placeholder="Ex: 1234ABCD">
+                <small class="help-text">Necessário para configurar o Webhook.</small>
+            </div>
+
+            <h4 class="ui dividing header section-title">Configurações de Mensagem</h4>
+
+            <div class="field toggle-container">
+                <label>Assinar Mensagens</label>
+                <div class="ui toggle checkbox">
+                    <input type="checkbox" id="sign_messages">
+                    <label>Assinar com o nome do agente</label>
+                </div>
+            </div>
+
+            <div class="field">
+                <label>Delimitador de Assinatura</label>
+                <input type="text" id="signature_delimiter" placeholder="\n">
+                <small class="help-text">Ex: \n para quebra de linha</small>
+            </div>
+
+            <h4 class="ui dividing header section-title">Caixa de Entrada</h4>
+
+            <div class="field">
+                <label>Nome da Caixa de Entrada</label>
+                <input type="text" id="inbox_name" placeholder="Ex: Setor de Cartões">
+            </div>
+
+            <div class="field">
+                <label>Organização</label>
+                <input type="text" id="organization">
+            </div>
+
+            <div class="field">
+                <label>Logo (URL)</label>
+                <input type="text" id="logo_url">
+            </div>
+
+            <div class="field toggle-container">
+                <label>Conversa Pendente</label>
+                <div class="ui toggle checkbox">
+                    <input type="checkbox" id="conversation_pending">
+                    <label>Conversas começam como pendentes (Desativa auto-atribuição)</label>
+                </div>
+            </div>
+
+            <div class="field toggle-container">
+                <label>Reabrir Conversa</label>
+                <div class="ui toggle checkbox">
+                    <input type="checkbox" id="reopen_conversation">
+                    <label>Reabrir a conversa ao receber mensagem</label>
+                </div>
+            </div>
+
+            <h4 class="ui dividing header section-title">Importação</h4>
+
+            <div class="field toggle-container">
+                <label>Importar Contatos</label>
+                <div class="ui toggle checkbox">
+                    <input type="checkbox" id="import_contacts">
+                    <label>Importar contatos do WhatsApp ao conectar</label>
+                </div>
+            </div>
+
+            <div class="field toggle-container">
+                <label>Importar Mensagens</label>
+                <div class="ui toggle checkbox">
+                    <input type="checkbox" id="import_messages">
+                    <label>Importar mensagens antigas</label>
+                </div>
+            </div>
+
+            <div class="field">
+                <label>Limite de Dias para Importação</label>
+                <input type="number" id="days_limit" value="7">
+            </div>
+
+            <div class="field">
+                <label>Ignorar JIDs</label>
+                <input type="text" id="ignore_jids_input" placeholder="Digite o número e pressione Enter">
+                <div id="jids_list" style="margin-top:10px;"></div>
+            </div>
+
+            <div class="ui divider"></div>
+            
+            <div class="field" style="display:none;">
+                <label>Token Admin (Oculto)</label>
+                <input type="password" id="wuzapi_admin_token">
+            </div>
+
+            <div class="field">
+                <label>Inbox ID (Gerado)</label>
+                <input type="text" id="inbox_id" readonly style="background:#eee">
+            </div>
+
+            <div class="ui error message" id="errorMessage"></div>
+            <div class="ui success message" id="successMessage"></div>
+
+            <div class="ui two buttons">
+                <button type="button" class="ui basic button" onclick="window.location.href='/dashboard'">Voltar</button>
+                <button type="button" class="ui teal button" onclick="saveAndCreate()">Salvar e Criar Automático</button>
+            </div>
+
+        </form>
+      </div>
     </div>
   </div>
 
@@ -86,39 +166,139 @@
   <script src="https://cdn.jsdelivr.net/npm/fomantic-ui@2.9.4/dist/semantic.min.js"></script>
 
   <script>
+    let ignoreJIDs = [];
+
     document.addEventListener('DOMContentLoaded', () => {
         const savedToken = localStorage.getItem('wuzapi_admin_token');
-        if(savedToken) document.getElementById('wuzapi_token').value = savedToken;
+        if(savedToken) document.getElementById('wuzapi_admin_token').value = savedToken;
+        $('.ui.checkbox').checkbox();
         loadConfig();
+
+        // Lógica de JIDs
+        $('#ignore_jids_input').on('keydown', function(e) {
+            if(e.key === 'Enter') {
+                e.preventDefault();
+                const val = this.value.trim();
+                if(val) {
+                    addJID(val);
+                    this.value = '';
+                }
+            }
+        });
     });
 
-    async function autoCreate() {
-        const form = $('#configForm');
+    function addJID(jid) {
+        if(!ignoreJIDs.includes(jid)) {
+            ignoreJIDs.push(jid);
+            renderJIDs();
+        }
+    }
+
+    function removeJID(jid) {
+        ignoreJIDs = ignoreJIDs.filter(j => j !== jid);
+        renderJIDs();
+    }
+
+    function renderJIDs() {
+        const container = $('#jids_list');
+        container.empty();
+        ignoreJIDs.forEach(jid => {
+            container.append(`
+                <div class="ui label">
+                    ${jid}
+                    <i class="delete icon" onclick="removeJID('${jid}')"></i>
+                </div>
+            `);
+        });
+    }
+
+    function getConfigObj() {
+        return {
+            enabled: $('#enabled').checkbox('is checked'),
+            url: $('#url').val(),
+            account_id: $('#account_id').val(),
+            token: $('#token').val(),
+            inbox_id: $('#inbox_id').val(),
+            
+            sign_messages: $('#sign_messages').checkbox('is checked'),
+            signature_delimiter: $('#signature_delimiter').val(),
+            reopen_conversation: $('#reopen_conversation').checkbox('is checked'),
+            conversation_pending: $('#conversation_pending').checkbox('is checked'),
+            
+            inbox_name: $('#inbox_name').val(),
+            organization: $('#organization').val(),
+            logo_url: $('#logo_url').val(),
+            
+            import_contacts: $('#import_contacts').checkbox('is checked'),
+            import_messages: $('#import_messages').checkbox('is checked'),
+            days_limit: parseInt($('#days_limit').val()) || 7,
+            ignore_jids: ignoreJIDs
+        };
+    }
+
+    async function loadConfig() {
+        const adminToken = document.getElementById('wuzapi_admin_token').value;
+        if(!adminToken) return;
+
+        try {
+            const res = await fetch('/chatwoot/config', { headers: { 'Authorization': adminToken } });
+            if(res.ok) {
+                const data = await res.json();
+                
+                // Preenche campos
+                if(data.enabled) $('#enabled').checkbox('check');
+                $('#url').val(data.url);
+                $('#account_id').val(data.account_id);
+                $('#token').val(data.token);
+                $('#inbox_id').val(data.inbox_id);
+                
+                if(data.sign_messages) $('#sign_messages').checkbox('check');
+                $('#signature_delimiter').val(data.signature_delimiter || '\\n');
+                if(data.reopen_conversation) $('#reopen_conversation').checkbox('check');
+                if(data.conversation_pending) $('#conversation_pending').checkbox('check');
+                
+                $('#inbox_name').val(data.inbox_name);
+                $('#organization').val(data.organization);
+                $('#logo_url').val(data.logo_url);
+                
+                if(data.import_contacts) $('#import_contacts').checkbox('check');
+                if(data.import_messages) $('#import_messages').checkbox('check');
+                $('#days_limit').val(data.days_limit);
+                
+                if(data.ignore_jids) {
+                    ignoreJIDs = data.ignore_jids;
+                    renderJIDs();
+                }
+            }
+        } catch(e) {}
+    }
+
+    async function saveAndCreate() {
+        const adminToken = document.getElementById('wuzapi_admin_token').value;
+        const sessionToken = document.getElementById('session_token').value;
+        const form = $('.ui.form');
+        
         form.removeClass('error success loading');
         
-        // Validação
-        const name = document.getElementById('inbox_name').value;
-        const sessionToken = document.getElementById('session_token').value;
-        const adminToken = document.getElementById('wuzapi_token').value;
-
-        if(!name || !sessionToken || !adminToken) {
-            $('#errorMessage').text("Preencha: Admin Token, Instance Token e Nome da Caixa.");
+        if(!sessionToken) {
+            $('#errorMessage').text("Instance Token é obrigatório para configurar.");
             form.addClass('error');
             return;
         }
 
         form.addClass('loading');
 
+        const config = getConfigObj();
+        
+        // Payload especial que manda a config + dados para criação
         const payload = {
-            url: document.getElementById('cw_url').value,
-            token: document.getElementById('cw_token').value,
-            account_id: document.getElementById('cw_account_id').value,
+            config: config,
             session_token: sessionToken,
-            name: name, // Envia o nome para criar
             wuzapi_url: window.location.origin
         };
 
         try {
+            // Usa a rota de auto-create (que também salva)
             const res = await fetch('/chatwoot/auto-create', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': adminToken },
@@ -127,7 +307,7 @@
             const data = await res.json();
 
             if (res.ok) {
-                document.getElementById('cw_inbox_id').value = data.inbox_id;
+                $('#inbox_id').val(data.inbox_id);
                 $('#successMessage').html(`<div class="header">Sucesso!</div><p>${data.message}</p>`);
                 form.addClass('success');
                 localStorage.setItem('wuzapi_admin_token', adminToken);
@@ -136,42 +316,11 @@
                 form.addClass('error');
             }
         } catch (e) {
-            $('#errorMessage').text("Erro de conexão com o servidor.");
+            $('#errorMessage').text("Erro de conexão.");
             form.addClass('error');
         } finally {
             form.removeClass('loading');
         }
-    }
-
-    async function loadConfig() {
-        const adminToken = document.getElementById('wuzapi_token').value;
-        if(!adminToken) return;
-        try {
-            const res = await fetch('/chatwoot/config', { headers: { 'Authorization': adminToken } });
-            if(res.ok) {
-                const data = await res.json();
-                document.getElementById('cw_url').value = data.url || '';
-                document.getElementById('cw_token').value = data.token || '';
-                document.getElementById('cw_account_id').value = data.account_id || '';
-                document.getElementById('cw_inbox_id').value = data.inbox_id || '';
-            }
-        } catch(e){}
-    }
-    
-    async function saveConfig() {
-        const adminToken = document.getElementById('wuzapi_token').value;
-        const payload = {
-            url: document.getElementById('cw_url').value,
-            token: document.getElementById('cw_token').value,
-            account_id: document.getElementById('cw_account_id').value,
-            inbox_id: document.getElementById('cw_inbox_id').value
-        };
-        await fetch('/chatwoot/config', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': adminToken },
-            body: JSON.stringify(payload)
-        });
-        alert("Salvo!");
     }
   </script>
 </body>

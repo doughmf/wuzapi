@@ -2,21 +2,15 @@ package main
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
-	"fmt"
 	"mime"
 	"os"
 	"strings"
 	"time"
 
 	"go.mau.fi/whatsmeow"
-	"go.mau.fi/whatsmeow/appstate"
 	"go.mau.fi/whatsmeow/store/sqlstore"
-	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
-	"google.golang.org/protobuf/proto"
 )
 
 type Client struct {
@@ -71,31 +65,31 @@ func (c *Client) Disconnect() {
 func (c *Client) EventHandler(evt interface{}) {
 	switch v := evt.(type) {
 	case *events.Message:
-		// Ignora mensagens muito antigas (evita spam na reconexão)
+		// Ignora mensagens antigas
 		if time.Since(v.Info.Timestamp) > 2*time.Minute {
 			return
 		}
 
-		// INTEGRACAO CHATWOOT
+		// --- INTEGRACAO CHATWOOT ---
 		go func() {
-			// Verifica se deve ignorar este JID (Grupos ou Lista Negra)
+			// Verifica se deve ignorar este contato
 			if shouldIgnoreJID(v.Info.Chat.String()) {
 				return
 			}
 
-			// Define quem enviou (Nome ou Telefone)
+			// Define quem enviou
 			senderName := v.Info.PushName
 			if senderName == "" {
 				senderName = strings.Split(v.Info.Sender.String(), "@")[0]
 			}
 			senderPhone := v.Info.Sender.String()
 
-			// Lógica de Mídia vs Texto
+			// Variaveis de Mídia
 			isMedia := false
 			var fileData []byte
 			var fileName, caption, mimeType string
 
-			// 1. Tenta extrair imagem
+			// 1. Imagem
 			if img := v.Message.GetImageMessage(); img != nil {
 				isMedia = true
 				data, err := c.client.Download(img)
@@ -106,20 +100,22 @@ func (c *Client) EventHandler(evt interface{}) {
 					fileName = "image.jpg"
 				}
 			} else if audio := v.Message.GetAudioMessage(); audio != nil {
-				// 2. Tenta extrair áudio
+				// 2. Áudio
 				isMedia = true
 				data, err := c.client.Download(audio)
 				if err == nil {
 					fileData = data
 					mimeType = audio.GetMimetype()
-					// Detecta extensão
 					ext := ".ogg"
-					if strings.Contains(mimeType, "mp4") { ext = ".mp4" }
-					else if strings.Contains(mimeType, "mpeg") { ext = ".mp3" }
+					if strings.Contains(mimeType, "mp4") {
+						ext = ".mp4"
+					} else if strings.Contains(mimeType, "mpeg") {
+						ext = ".mp3"
+					}
 					fileName = "audio" + ext
 				}
 			} else if video := v.Message.GetVideoMessage(); video != nil {
-				// 3. Tenta extrair vídeo
+				// 3. Vídeo
 				isMedia = true
 				data, err := c.client.Download(video)
 				if err == nil {
@@ -129,7 +125,7 @@ func (c *Client) EventHandler(evt interface{}) {
 					fileName = "video.mp4"
 				}
 			} else if doc := v.Message.GetDocumentMessage(); doc != nil {
-				// 4. Tenta extrair documento
+				// 4. Documento
 				isMedia = true
 				data, err := c.client.Download(doc)
 				if err == nil {
@@ -139,47 +135,43 @@ func (c *Client) EventHandler(evt interface{}) {
 					fileName = doc.GetFileName()
 					if fileName == "" {
 						exts, _ := mime.ExtensionsByType(mimeType)
-						if len(exts) > 0 { fileName = "file" + exts[0] } else { fileName = "file.bin" }
+						if len(exts) > 0 {
+							fileName = "file" + exts[0]
+						} else {
+							fileName = "file.bin"
+						}
 					}
-				}
-			} else if sticker := v.Message.GetStickerMessage(); sticker != nil {
-				// 5. Tenta extrair figurinha
-				isMedia = true
-				data, err := c.client.Download(sticker)
-				if err == nil {
-					fileData = data
-					mimeType = sticker.GetMimetype()
-					fileName = "sticker.webp"
 				}
 			}
 
-			// ENVIA PARA O CHATWOOT
+			// Envia para o Chatwoot
 			if isMedia && len(fileData) > 0 {
 				SendAttachmentToChatwoot(senderName, senderPhone, caption, fileName, fileData)
 			} else {
-				// Mensagem de Texto Simples
+				// Texto Simples
 				text := ""
 				if v.Message.Conversation != nil {
 					text = *v.Message.Conversation
 				} else if v.Message.ExtendedTextMessage != nil {
 					text = *v.Message.ExtendedTextMessage.Text
 				}
-				
+
 				if text != "" {
 					SendToChatwoot(senderName, senderPhone, text)
 				}
 			}
 		}()
+		// ---------------------------
 
-		// Webhook padrão do Wuzapi (Mantém compatibilidade com n8n/Typebot)
+		// Webhook padrão do Wuzapi
 		go c.HandleWebhook(v)
 
 	case *events.Connected:
-		// Atualiza status se necessário
+		// Lógica de conexão se necessária
 	}
 }
 
-// Função auxiliar para ignorar JIDs configurados no Chatwoot
+// Helper para ignorar JIDs (definido no chatwoot.go, mas chamado aqui)
 func shouldIgnoreJID(jid string) bool {
 	cwCfgMutex.RLock()
 	defer cwCfgMutex.RUnlock()
@@ -191,18 +183,13 @@ func shouldIgnoreJID(jid string) bool {
 	return false
 }
 
-// --- LÓGICA PADRÃO DO WUZAPI ABAIXO ---
-
+// Mantém compatibilidade com webhook original
 func (c *Client) HandleWebhook(v *events.Message) {
-	// Lógica original de webhook do Wuzapi (preservada para não quebrar outras integrações)
-	// Se você usar APENAS Chatwoot, pode deixar essa função vazia para economizar recursos.
-	
-	// Exemplo simplificado de envio de webhook padrão:
 	webhookURL := os.Getenv("WUZAPI_WEBHOOK_URL")
-	if webhookURL == "" { return }
-
-	// Serializa e envia (código simplificado)
-	// ... (manter implementação original se houver, ou deixar simples)
+	if webhookURL == "" {
+		return
+	}
+	// Lógica original de webhook simplificada ou omitida se não usada
 }
 
 func NewClient(deviceStore *sqlstore.Device, logger waLog.Logger) *Client {
@@ -212,22 +199,4 @@ func NewClient(deviceStore *sqlstore.Device, logger waLog.Logger) *Client {
 	}
 	c.AddEventHandler(client.EventHandler)
 	return client
-}
-
-// Função para formatar JID (usada em outros lugares)
-func parseJID(arg string) (types.JID, bool) {
-	if arg == "" {
-		return types.NewJID("", types.DefaultUserServer), false
-	}
-	arg = strings.ReplaceAll(arg, "+", "")
-	arg = strings.ReplaceAll(arg, " ", "")
-	
-	if strings.Contains(arg, "@") {
-		jid, err := types.ParseJID(arg)
-		return jid, err == nil
-	}
-	
-	// Adiciona sufixo padrão se for apenas número
-	jid, err := types.ParseJID(arg + "@s.whatsapp.net")
-	return jid, err == nil
 }

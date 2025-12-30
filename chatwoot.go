@@ -67,10 +67,15 @@ type CreateInboxChannel struct {
 	Type       string `json:"type"`
 	WebhookUrl string `json:"webhook_url"`
 }
+
+// ATUALIZADO: Adicionado campos para manter a conversa na mesma caixa
 type CreateInboxRequest struct {
-	Name    string             `json:"name"`
-	Channel CreateInboxChannel `json:"channel"`
+	Name                       string             `json:"name"`
+	Channel                    CreateInboxChannel `json:"channel"`
+	AllowMessagesAfterResolved bool               `json:"allow_messages_after_resolved"`
+	LockToSingleConversation   bool               `json:"lock_to_single_conversation"`
 }
+
 type CreateInboxResponse struct {
 	Id   int    `json:"id"`
 	Name string `json:"name"`
@@ -81,6 +86,7 @@ type ChatwootSearchResponse struct {
 		ID int `json:"id"`
 	} `json:"payload"`
 }
+
 type ChatwootContactResponse struct {
 	Payload struct {
 		Contact struct {
@@ -88,6 +94,7 @@ type ChatwootContactResponse struct {
 		} `json:"contact"`
 	} `json:"payload"`
 }
+
 type CwWebhook struct {
 	Event        string `json:"event"`
 	MessageType  string `json:"message_type"`
@@ -152,7 +159,7 @@ func (s *server) HandleAutoCreateInbox() http.HandlerFunc {
 			URL          string `json:"url"`
 			Token        string `json:"token"`
 			AccountID    string `json:"account_id"`
-			Name         string `json:"name"` // Nome da Caixa
+			Name         string `json:"name"`
 			WuzapiURL    string `json:"wuzapi_url"`
 			SessionToken string `json:"session_token"`
 		}
@@ -170,12 +177,15 @@ func (s *server) HandleAutoCreateInbox() http.HandlerFunc {
 		req.URL = strings.TrimSuffix(req.URL, "/")
 		webhookEndpoint := fmt.Sprintf("%s/chatwoot/webhook?token=%s", req.WuzapiURL, req.SessionToken)
 
+		// PAYLOAD CONFIGURADO PARA MANTER A CONVERSA
 		cwPayload := CreateInboxRequest{
 			Name: req.Name,
 			Channel: CreateInboxChannel{
 				Type:       "api",
 				WebhookUrl: webhookEndpoint,
 			},
+			AllowMessagesAfterResolved: true, // Continua na mesma conversa se o cliente chamar depois de resolvido
+			LockToSingleConversation:   true, // Força ser uma única conversa (estilo WhatsApp)
 		}
 		jsonPayload, _ := json.Marshal(cwPayload)
 
@@ -221,13 +231,16 @@ func (s *server) HandleAutoCreateInbox() http.HandlerFunc {
 	}
 }
 
-// --- LÓGICA DE ENVIO (Mantida) ---
+// --- ENVIO ---
+
 func SendToChatwoot(pushName string, senderUser string, text string) {
 	cwCfgMutex.RLock()
 	cfg := cwCfg
 	cwCfgMutex.RUnlock()
 
-	if cfg.URL == "" || cfg.Token == "" { return }
+	if cfg.URL == "" || cfg.Token == "" {
+		return
+	}
 
 	cwInboxID, _ := strconv.Atoi(cfg.InboxID)
 	phoneClean := strings.Replace(senderUser, "+", "", -1)
@@ -235,7 +248,9 @@ func SendToChatwoot(pushName string, senderUser string, text string) {
 	phoneNumber := "+" + phoneClean
 
 	contactID := getOrCreateContact(cfg.URL, cfg.AccountID, cfg.Token, cwInboxID, phoneNumber, pushName)
-	if contactID == 0 { return }
+	if contactID == 0 {
+		return
+	}
 	sendConversation(cfg.URL, cfg.AccountID, cfg.Token, cwInboxID, contactID, text)
 }
 

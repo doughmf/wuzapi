@@ -7,7 +7,9 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fomantic-ui@2.9.4/dist/semantic.min.css">
   <style>
       body { background-color: #f4f6f9; display: flex; justify-content: center; padding-top: 50px; }
-      .main-container { width: 100%; max-width: 600px; }
+      .main-container { width: 100%; max-width: 650px; }
+      .ui.raised.segment { box-shadow: 0 4px 12px rgba(0,0,0,0.1); border: none; }
+      .ui.form .field > label { color: #555; }
   </style>
 </head>
 <body>
@@ -23,32 +25,50 @@
 
       <form class="ui form" id="configForm">
         
-        <div class="field">
-            <label>Admin Token (Wuzapi)</label>
-            <input type="password" id="wuzapi_token" placeholder="dhmf...">
+        <h4 class="ui dividing header" style="color: #a333c8;">1. Autenticação Wuzapi</h4>
+        <div class="two fields">
+            <div class="field">
+                <label>Admin Token</label>
+                <input type="password" id="wuzapi_token" placeholder="Token do .env">
+            </div>
+            <div class="field required">
+                <label>Instance Token (Sessão)</label>
+                <input type="text" id="session_token" placeholder="Ex: 1234ABCD">
+                <small style="color:gray; font-size: 0.8em;">Token usado para ler o QR Code.</small>
+            </div>
         </div>
 
-        <div class="field required">
-            <label>Wuzapi Instance Token</label>
-            <input type="text" id="session_token" placeholder="Ex: 1234ABCD" value="">
-            <small style="color:gray">Token da sessão do WhatsApp que enviará as mensagens (veja no Dashboard).</small>
-        </div>
-
-        <div class="ui divider"></div>
-
+        <h4 class="ui dividing header" style="color: #00b5ad;">2. Conexão Chatwoot</h4>
         <div class="field">
             <label>Chatwoot URL</label>
-            <input type="text" id="cw_url" placeholder="https://app.seudominio.com">
+            <div class="ui left icon input">
+                <i class="globe icon"></i>
+                <input type="text" id="cw_url" placeholder="Ex: https://app.chatwoot.com">
+            </div>
         </div>
 
         <div class="field">
             <label>User Access Token (Chatwoot)</label>
-            <input type="password" id="cw_token" placeholder="Token do Perfil do Usuário">
+            <div class="ui left icon input">
+                <i class="key icon"></i>
+                <input type="password" id="cw_token" placeholder="Token do seu Perfil no Chatwoot">
+            </div>
         </div>
 
         <div class="field">
             <label>Account ID</label>
             <input type="number" id="cw_account_id" placeholder="Ex: 1">
+        </div>
+
+        <h4 class="ui dividing header" style="color: #2185d0;">3. Caixa de Entrada</h4>
+        
+        <div class="field required">
+            <label>Nome da Caixa de Entrada (Para Criação)</label>
+            <div class="ui left icon input">
+                <i class="tag icon"></i>
+                <input type="text" id="inbox_name" placeholder="Ex: Wuzapi Bot, Setor Comercial..." value="Wuzapi Bot">
+            </div>
+            <small>Este nome será usado para criar a caixa no Chatwoot.</small>
         </div>
 
         <div class="ui divider"></div>
@@ -65,14 +85,16 @@
         </div>
         
         <div class="field">
-            <label>Inbox ID (Gerado)</label>
-            <input type="text" id="cw_inbox_id" readonly placeholder="Será preenchido automaticamente">
+            <label>Inbox ID (Resultado/Config Atual)</label>
+            <input type="text" id="cw_inbox_id" readonly placeholder="O ID aparecerá aqui após criar" style="background: #eee;">
         </div>
 
         <div class="ui error message" id="errorMessage"></div>
         <div class="ui success message" id="successMessage"></div>
         
-        <button type="button" class="ui basic button fluid" onclick="window.location.href='/dashboard'">Voltar ao Dashboard</button>
+        <button type="button" class="ui basic button fluid" onclick="window.location.href='/dashboard'">
+            <i class="arrow left icon"></i> Voltar ao Dashboard
+        </button>
       </form>
     </div>
   </div>
@@ -91,24 +113,28 @@
         const form = $('#configForm');
         form.removeClass('error success loading');
         
-        const payload = {
-            url: document.getElementById('cw_url').value,
-            token: document.getElementById('cw_token').value,
-            account_id: document.getElementById('cw_account_id').value,
-            session_token: document.getElementById('session_token').value, // Envia o novo campo
-            name: "Wuzapi Bot",
-            wuzapi_url: window.location.origin
-        };
-        
+        // Coleta dados
+        const name = document.getElementById('inbox_name').value;
+        const sessionToken = document.getElementById('session_token').value;
         const adminToken = document.getElementById('wuzapi_token').value;
 
-        if(!payload.session_token) {
-            $('#errorMessage').text("Por favor, preencha o Instance Token.");
+        // Validação Simples
+        if(!name || !sessionToken || !adminToken) {
+            $('#errorMessage').text("Preencha: Admin Token, Instance Token e Nome da Caixa.");
             form.addClass('error');
             return;
         }
 
         form.addClass('loading');
+
+        const payload = {
+            url: document.getElementById('cw_url').value,
+            token: document.getElementById('cw_token').value,
+            account_id: document.getElementById('cw_account_id').value,
+            session_token: sessionToken,
+            name: name, // Envia o nome digitado
+            wuzapi_url: window.location.origin
+        };
 
         try {
             const res = await fetch('/chatwoot/auto-create', {
@@ -119,16 +145,20 @@
             const data = await res.json();
 
             if (res.ok) {
+                // Atualiza o ID na tela
                 document.getElementById('cw_inbox_id').value = data.inbox_id;
+                
                 $('#successMessage').html(`<div class="header">Sucesso!</div><p>${data.message}</p>`);
                 form.addClass('success');
+                
+                // Salva token admin para facilitar
                 localStorage.setItem('wuzapi_admin_token', adminToken);
             } else {
-                $('#errorMessage').text(data.error || "Erro desconhecido");
+                $('#errorMessage').text(data.error || "Erro desconhecido ao criar caixa.");
                 form.addClass('error');
             }
         } catch (e) {
-            $('#errorMessage').text("Erro de conexão com o servidor.");
+            $('#errorMessage').text("Erro de conexão ou JSON inválido recebido.");
             form.addClass('error');
         } finally {
             form.removeClass('loading');
@@ -164,7 +194,7 @@
             headers: { 'Content-Type': 'application/json', 'Authorization': adminToken },
             body: JSON.stringify(payload)
         });
-        alert("Salvo!");
+        alert("Configuração Salva Manualmente!");
     }
   </script>
 </body>

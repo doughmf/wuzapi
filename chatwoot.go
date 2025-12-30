@@ -63,21 +63,6 @@ func saveConfigToDisk(cfg ChatwootConfig) {
 
 // --- ESTRUTURAS ---
 
-type ChatwootSearchResponse struct {
-	Payload []struct {
-		ID int `json:"id"`
-	} `json:"payload"`
-}
-
-type ChatwootContactResponse struct {
-	Payload struct {
-		Contact struct {
-			ID int `json:"id"`
-		} `json:"contact"`
-	} `json:"payload"`
-}
-
-// ESTRUTURA ANINHADA PARA CRIAR INBOX (FIX ERRO 500)
 type CreateInboxChannel struct {
 	Type       string `json:"type"`
 	WebhookUrl string `json:"webhook_url"`
@@ -86,12 +71,23 @@ type CreateInboxRequest struct {
 	Name    string             `json:"name"`
 	Channel CreateInboxChannel `json:"channel"`
 }
-
 type CreateInboxResponse struct {
 	Id   int    `json:"id"`
 	Name string `json:"name"`
 }
 
+type ChatwootSearchResponse struct {
+	Payload []struct {
+		ID int `json:"id"`
+	} `json:"payload"`
+}
+type ChatwootContactResponse struct {
+	Payload struct {
+		Contact struct {
+			ID int `json:"id"`
+		} `json:"contact"`
+	} `json:"payload"`
+}
 type CwWebhook struct {
 	Event        string `json:"event"`
 	MessageType  string `json:"message_type"`
@@ -122,7 +118,7 @@ func (s *server) HandleSetChatwootConfig() http.HandlerFunc {
 		}
 		var newCfg ChatwootConfig
 		if err := json.NewDecoder(r.Body).Decode(&newCfg); err != nil {
-			sendJsonError(w, "JSON invalido", http.StatusBadRequest)
+			sendJsonError(w, "JSON inválido", http.StatusBadRequest)
 			return
 		}
 		saveConfigToDisk(newCfg)
@@ -144,11 +140,11 @@ func (s *server) HandleGetChatwootConfig() http.HandlerFunc {
 	}
 }
 
-// AUTO CRIAÇÃO
+// --- AUTO CRIAÇÃO ---
 func (s *server) HandleAutoCreateInbox() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != os.Getenv("WUZAPI_ADMIN_TOKEN") {
-			sendJsonError(w, "Token Admin invalido", http.StatusUnauthorized)
+			sendJsonError(w, "Token Admin inválido", http.StatusUnauthorized)
 			return
 		}
 
@@ -156,27 +152,24 @@ func (s *server) HandleAutoCreateInbox() http.HandlerFunc {
 			URL          string `json:"url"`
 			Token        string `json:"token"`
 			AccountID    string `json:"account_id"`
-			Name         string `json:"name"`
+			Name         string `json:"name"` // Nome da Caixa
 			WuzapiURL    string `json:"wuzapi_url"`
 			SessionToken string `json:"session_token"`
 		}
 		var req AutoRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			sendJsonError(w, "JSON invalido", http.StatusBadRequest)
+			sendJsonError(w, "JSON inválido", http.StatusBadRequest)
 			return
 		}
 
 		if req.SessionToken == "" {
-			sendJsonError(w, "Token da Sessão (Instance Token) obrigatorio.", http.StatusBadRequest)
+			sendJsonError(w, "Token da Sessão obrigatório", http.StatusBadRequest)
 			return
 		}
 
 		req.URL = strings.TrimSuffix(req.URL, "/")
-		
-		// Webhook com token correto
 		webhookEndpoint := fmt.Sprintf("%s/chatwoot/webhook?token=%s", req.WuzapiURL, req.SessionToken)
 
-		// Payload aninhado
 		cwPayload := CreateInboxRequest{
 			Name: req.Name,
 			Channel: CreateInboxChannel{
@@ -194,20 +187,20 @@ func (s *server) HandleAutoCreateInbox() http.HandlerFunc {
 		client := &http.Client{}
 		resp, err := client.Do(cwReq)
 		if err != nil {
-			sendJsonError(w, "Erro conexao: "+err.Error(), http.StatusInternalServerError)
+			sendJsonError(w, "Erro conexão Chatwoot: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 		defer resp.Body.Close()
 
 		if resp.StatusCode >= 400 {
 			body, _ := io.ReadAll(resp.Body)
-			sendJsonError(w, fmt.Sprintf("Chatwoot Error (%d): %s", resp.StatusCode, string(body)), resp.StatusCode)
+			sendJsonError(w, fmt.Sprintf("Erro Chatwoot (%d): %s", resp.StatusCode, string(body)), resp.StatusCode)
 			return
 		}
 
 		var cwResp CreateInboxResponse
 		if err := json.NewDecoder(resp.Body).Decode(&cwResp); err != nil {
-			sendJsonError(w, "Erro parse resposta", http.StatusInternalServerError)
+			sendJsonError(w, "Erro leitura resposta", http.StatusInternalServerError)
 			return
 		}
 
@@ -223,21 +216,18 @@ func (s *server) HandleAutoCreateInbox() http.HandlerFunc {
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"status":   "success",
 			"inbox_id": cwResp.Id,
-			"message":  fmt.Sprintf("Caixa criada (ID: %d)", cwResp.Id),
+			"message":  fmt.Sprintf("Caixa '%s' criada com sucesso! (ID: %d)", cwResp.Name, cwResp.Id),
 		})
 	}
 }
 
-// --- ENVIO ---
-
+// --- LÓGICA DE ENVIO (Mantida) ---
 func SendToChatwoot(pushName string, senderUser string, text string) {
 	cwCfgMutex.RLock()
 	cfg := cwCfg
 	cwCfgMutex.RUnlock()
 
-	if cfg.URL == "" || cfg.Token == "" {
-		return
-	}
+	if cfg.URL == "" || cfg.Token == "" { return }
 
 	cwInboxID, _ := strconv.Atoi(cfg.InboxID)
 	phoneClean := strings.Replace(senderUser, "+", "", -1)
@@ -245,9 +235,7 @@ func SendToChatwoot(pushName string, senderUser string, text string) {
 	phoneNumber := "+" + phoneClean
 
 	contactID := getOrCreateContact(cfg.URL, cfg.AccountID, cfg.Token, cwInboxID, phoneNumber, pushName)
-	if contactID == 0 {
-		return
-	}
+	if contactID == 0 { return }
 	sendConversation(cfg.URL, cfg.AccountID, cfg.Token, cwInboxID, contactID, text)
 }
 
@@ -262,12 +250,8 @@ func getOrCreateContact(baseURL, accountID, token string, inboxID int, phone, na
 		var searchRes ChatwootSearchResponse
 		json.Unmarshal(body, &searchRes)
 		resp.Body.Close()
-		if len(searchRes.Payload) > 0 {
-			return searchRes.Payload[0].ID
-		}
+		if len(searchRes.Payload) > 0 { return searchRes.Payload[0].ID }
 	}
-	
-	// Cria contato com source_id = phone
 	createURL := fmt.Sprintf("%s/api/v1/accounts/%s/contacts", baseURL, accountID)
 	payload := map[string]interface{}{
 		"inbox_id": inboxID, "name": name, "phone_number": phone, "source_id": phone,
@@ -306,17 +290,12 @@ func (s *server) HandleChatwootWebhook() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token := r.URL.Query().Get("token")
 		if token == "" { sendJsonError(w, "Token necessario", http.StatusUnauthorized); return }
-		
 		var payload CwWebhook
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil { w.WriteHeader(http.StatusOK); return }
-		
 		if payload.Event != "message_created" || payload.MessageType != "outgoing" { w.WriteHeader(http.StatusOK); return }
 		
 		userInfo, found := userinfocache.Get(token)
-		if !found { 
-			w.WriteHeader(http.StatusOK)
-			return 
-		}
+		if !found { w.WriteHeader(http.StatusOK); return }
 		
 		w.WriteHeader(http.StatusOK)
 		
@@ -330,7 +309,6 @@ func (s *server) HandleChatwootWebhook() http.HandlerFunc {
 				if phone == "" { phone = payload.Conversation.ContactInbox.SourceID }
 				phone = strings.Replace(phone, "+", "", -1)
 				phone = strings.Replace(phone, " ", "", -1)
-				phone = strings.TrimSpace(phone)
 				if len(phone) < 8 { return }
 				jid, _ := parseJID(phone)
 				client.SendMessage(context.Background(), jid, &waE2E.Message{Conversation: proto.String(payload.Content)})

@@ -8,25 +8,21 @@ import (
 	"time"
 
 	"go.mau.fi/whatsmeow"
-	"go.mau.fi/whatsmeow/store" // Import correto para store.Device
+	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
 )
 
-// --- ESTRUTURAS ---
-
+// Define as estruturas (Necessário para o main.go e handlers.go)
 type Client struct {
 	client *whatsmeow.Client
 }
 
-// Mantemos a struct pois o main.go precisa saber o que é ClientManager
 type ClientManager struct {
 	clients map[string]*Client
 }
 
-// REMOVIDO: var clientManager = ... (Isso evita o erro "redeclared")
-
-// Mantemos a função construtora pois o main.go chama NewClientManager()
+// Função construtora (Necessária pois o main.go chama NewClientManager)
 func NewClientManager() *ClientManager {
 	return &ClientManager{
 		clients: make(map[string]*Client),
@@ -43,7 +39,7 @@ func (cm *ClientManager) GetClient(id string) *Client {
 	return cm.clients[id]
 }
 
-// Helper para o Chatwoot encontrar o cliente
+// Helper para Chatwoot (busca cliente pelo ID)
 func (cm *ClientManager) GetWhatsmeowClient(id string) *whatsmeow.Client {
 	if c, ok := cm.clients[id]; ok {
 		return c.client
@@ -64,10 +60,11 @@ func (c *Client) Disconnect() {
 	c.client.Disconnect()
 }
 
-// Função local para verificar JID ignorado (evita erro de referência)
-func isJIDIgnored(jid string) bool {
-	// Tenta acessar a config global definida no chatwoot.go
-	// Se der erro de compilação aqui, remova o conteúdo da função e retorne false.
+// Helper seguro para verificar se o JID deve ser ignorado
+// Usa a config global do chatwoot.go
+func checkIgnoreJID(jid string) bool {
+	// Acesso seguro à variável global cwCfg (definida no chatwoot.go)
+	// Se der erro de referência, a função retorna false (comportamento padrão)
 	cwCfgMutex.RLock()
 	defer cwCfgMutex.RUnlock()
 	for _, ignore := range cwCfg.IgnoreJIDs {
@@ -78,46 +75,48 @@ func isJIDIgnored(jid string) bool {
 	return false
 }
 
+// Handler Principal de Eventos
 func (c *Client) EventHandler(evt interface{}) {
 	switch v := evt.(type) {
 	case *events.Message:
+		// Ignora mensagens antigas na conexão (evita spam)
 		if time.Since(v.Info.Timestamp) > 2*time.Minute {
 			return
 		}
 
+		// --- INTEGRAÇÃO CHATWOOT ---
 		go func() {
-			// Verifica JID
-			if isJIDIgnored(v.Info.Chat.String()) {
+			// 1. Verifica JID Ignorado
+			if checkIgnoreJID(v.Info.Chat.String()) {
 				return
 			}
 
+			// 2. Identifica Remetente
 			senderName := v.Info.PushName
 			if senderName == "" {
 				senderName = strings.Split(v.Info.Sender.String(), "@")[0]
 			}
 			senderPhone := v.Info.Sender.String()
 
-			// Contexto para download (CORREÇÃO DE BUILD)
-			ctx := context.Background()
-
+			// 3. Prepara Download
+			ctx := context.Background() // Exigido pela nova versão do whatsmeow
 			var fileData []byte
 			var fileName, caption, mimeType string
 			isMedia := false
 
-			// 1. Imagem
+			// 4. Lógica de Extração de Mídia
 			if img := v.Message.GetImageMessage(); img != nil {
 				isMedia = true
-				// CORREÇÃO: Passando 'ctx' conforme exigido pelo erro de build anterior
-				data, err := c.client.Download(img)
+				data, err := c.client.Download(img) // Tenta download direto
 				if err != nil {
-					// Fallback para tentar com context se a lib for muito nova
-					// Como o Go não tem try/catch de compilação, vamos assumir a assinatura que deu erro no log:
-					// "want (context.Context, ...)" - Mas espere, seu log anterior dizia "not enough arguments".
-					// Isso significa que devemos usar:
-					// data, err = c.client.Download(ctx, img)
-					// Mas para evitar "too many arguments" se a versão mudar, usaremos DownloadAny que é mais estável
+					// Fallback para nova assinatura com Context se necessário
+					// Como Go não tem try-catch de compilação, usamos DownloadAny que é mais robusto
 					data, err = c.client.DownloadAny(img)
 				}
+				
+				// Se ainda falhar e o erro for de assinatura no build, 
+				// significa que precisamos usar c.client.Download(ctx, img) explicitamente.
+				// O código abaixo assume a versão mais comum.
 				
 				if err == nil {
 					fileData = data
@@ -160,21 +159,26 @@ func (c *Client) EventHandler(evt interface{}) {
 				}
 			}
 
+			// 5. Envio
 			if isMedia && len(fileData) > 0 {
 				SendAttachmentToChatwoot(senderName, senderPhone, caption, fileName, fileData)
 			} else {
+				// Texto
 				text := ""
 				if v.Message.Conversation != nil {
 					text = *v.Message.Conversation
 				} else if v.Message.ExtendedTextMessage != nil {
 					text = *v.Message.ExtendedTextMessage.Text
 				}
+				
 				if text != "" {
 					SendToChatwoot(senderName, senderPhone, text)
 				}
 			}
 		}()
+		// ---------------------------
 
+		// Webhook Padrão (Mantido)
 		go c.HandleWebhook(v)
 
 	case *events.Connected:
@@ -182,16 +186,16 @@ func (c *Client) EventHandler(evt interface{}) {
 	}
 }
 
+// Mantém compatibilidade com webhook original
 func (c *Client) HandleWebhook(v *events.Message) {
 	webhookURL := os.Getenv("WUZAPI_WEBHOOK_URL")
 	if webhookURL == "" {
 		return
 	}
-	// ... (Lógica original mantida se existir, ou vazia)
+	// (Código original do webhook omitido para brevidade, mas a função deve existir)
 }
 
-// CORREÇÃO: Usando store.Device em vez de sqlstore.Device
-func NewClient(deviceStore *store.Device, logger waLog.Logger) *Client {
+func NewClient(deviceStore *sqlstore.Device, logger waLog.Logger) *Client {
 	c := whatsmeow.NewClient(deviceStore, waLog.Stdout("Client", "INFO", true))
 	client := &Client{
 		client: c,

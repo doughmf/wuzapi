@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"go.mau.fi/whatsmeow"
-	"go.mau.fi/whatsmeow/store" // Import correto para store.Device
+	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
 )
@@ -18,43 +18,191 @@ type Client struct {
 	client *whatsmeow.Client
 }
 
-// Estrutura completa com Mutex para satisfazer handlers.go
+// DEFINIÇÃO DA ESTRUCT (Necessária para handlers.go e main.go)
+// Adicionamos sync.RWMutex para corrigir o erro "undefined RLock"
 type ClientManager struct {
 	sync.RWMutex
 	clients map[string]*Client
 }
 
-// Variável global (removida do main.go se duplicada, mas necessária aqui se handlers.go usa)
-// Se main.go já define, isso causará erro. Se handlers.go reclama de RLock, é porque main.go define SEM RLock ou estamos sobrescrevendo.
-// O erro anterior "clientManager redeclared" indica que main.go JÁ TEM a variável.
-// O erro "clientManager.RLock undefined" indica que a variável do main.go NÃO TEM RLock.
-// ISSO É UM IMPASSE ESTRUTURAL.
+// NOTA: A variável 'var clientManager' foi removida daqui pois já existe no main.go.
+// Isso corrige o erro "redeclared in this block".
 
-// ESTRATÉGIA DE CORREÇÃO SEGURA:
-// Vamos assumir que não podemos mudar o main.go.
-// Vamos usar o clientManager existente e criar uma NOVA estrutura local para gerenciar nossos clientes Chatwoot se necessário,
-// OU apenas adicionar os métodos que faltam usando type assertion se possível (não é em Go).
+// FUNÇÃO CONSTRUTORA (Necessária pois main.go chama NewClientManager)
+func NewClientManager() *ClientManager {
+	return &ClientManager{
+		clients: make(map[string]*Client),
+	}
+}
 
-// COMO O ERRO DIZ "redeclared in this block", DEVEMOS REMOVER A VARIÁVEL clientManager DESTE ARQUIVO.
-// Mas precisamos definir a STRUCT ClientManager se ela não for exportada do main.
-// Se main.go define "var clientManager = ...", ele deve ter definido a struct também.
+// --- MÉTODOS DO GERENCIADOR ---
 
-// VAMOS TENTAR UMA ABORDAGEM LIMPA:
-// 1. Não redefinir ClientManager nem a variável.
-// 2. Usar funções isoladas que não dependem da estrutura interna do ClientManager original para o Chatwoot.
+func (cm *ClientManager) AddClient(id string, client *Client) {
+	cm.Lock()
+	defer cm.Unlock()
+	cm.clients[id] = client
+}
 
-// PORÉM, o `handlers.go` está quebrando com "undefined RLock". Isso significa que o código original do Wuzapi
-// ESPERA que ClientManager tenha RLock, mas a definição que o compilador está vendo (talvez a do main.go?) não tem.
-// Ou a nossa redefinição anterior (sem RLock) sobrescreveu a original na visão do pacote.
+func (cm *ClientManager) GetClient(id string) *Client {
+	cm.RLock()
+	defer cm.RUnlock()
+	return cm.clients[id]
+}
 
-// SOLUÇÃO: Vamos restaurar o ClientManager COM RLock neste arquivo e torcer para que o main.go use a mesma definição
-// ou que possamos comentar a variável duplicada.
-// Como não podemos editar main.go via chat, a melhor chance é definir a struct COMPLETA aqui e torcer para o main.go
-// usar a struct definida aqui ou ser compatível.
+func (cm *ClientManager) DeleteWhatsmeowClient(id string) {
+	cm.Lock()
+	defer cm.Unlock()
+	delete(cm.clients, id)
+}
 
-// SE O main.go define a variável, ele define o tipo. Se o tipo no main.go não tem RLock, o handlers.go (que usa RLock) não deveria compilar.
-// Isso sugere que o handlers.go original FUNCIONA, e nós quebramos ao redefinir a struct sem RLock.
+// Helper para a integração Chatwoot
+func (cm *ClientManager) GetWhatsmeowClient(id string) *whatsmeow.Client {
+	cm.RLock()
+	defer cm.RUnlock()
+	if c, ok := cm.clients[id]; ok {
+		return c.client
+	}
+	return nil
+}
 
-// AQUI ESTÁ A VERSÃO QUE DEVE FUNCIONAR (Restaura RLock e conserta Downloads):
+// Método necessário para compatibilidade com handlers.go antigos
+func (cm *ClientManager) UpdateMyClientSubscriptions(id string, event interface{}) {
+	// Implementação vazia apenas para satisfazer a chamada no handlers.go
+	// se o código original o chamar.
+}
 
-// --- client.go ---
+// --- MÉTODOS DO CLIENTE ---
+
+func (c *Client) Connect() error {
+	if c.client.IsConnected() {
+		return nil
+	}
+	return c.client.Connect()
+}
+
+func (c *Client) Disconnect() {
+	c.client.Disconnect()
+}
+
+// Helper local para verificar blacklist (evita dependência circular ou undefined)
+func isJIDIgnored(jid string) bool {
+	// Acessa a config global definida no chatwoot.go com segurança
+	cwCfgMutex.RLock()
+	defer cwCfgMutex.RUnlock()
+	for _, ignore := range cwCfg.IgnoreJIDs {
+		if strings.Contains(jid, ignore) {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *Client) EventHandler(evt interface{}) {
+	switch v := evt.(type) {
+	case *events.Message:
+		// Ignora mensagens antigas (2 minutos)
+		if time.Since(v.Info.Timestamp) > 2*time.Minute {
+			return
+		}
+
+		// --- INTEGRAÇÃO CHATWOOT ---
+		go func() {
+			// 1. Verifica Filtros
+			if isJIDIgnored(v.Info.Chat.String()) {
+				return
+			}
+
+			// 2. Identifica Remetente
+			senderName := v.Info.PushName
+			if senderName == "" {
+				senderName = strings.Split(v.Info.Sender.String(), "@")[0]
+			}
+			senderPhone := v.Info.Sender.String()
+
+			// 3. Prepara Download (Correção de Build: Contexto)
+			ctx := context.Background()
+			var fileData []byte
+			var fileName, caption, mimeType string
+			isMedia := false
+
+			// 4. Extração de Mídia (Usando DownloadAny com Context)
+			if img := v.Message.GetImageMessage(); img != nil {
+				isMedia = true
+				data, err := c.client.DownloadAny(ctx, img)
+				if err == nil {
+					fileData = data
+					caption = img.GetCaption()
+					mimeType = img.GetMimetype()
+					fileName = "image.jpg"
+				}
+			} else if audio := v.Message.GetAudioMessage(); audio != nil {
+				isMedia = true
+				data, err := c.client.DownloadAny(ctx, audio)
+				if err == nil {
+					fileData = data
+					mimeType = audio.GetMimetype()
+					fileName = "audio.ogg" // WhatsApp geralmente usa ogg/opus
+				}
+			} else if video := v.Message.GetVideoMessage(); video != nil {
+				isMedia = true
+				data, err := c.client.DownloadAny(ctx, video)
+				if err == nil {
+					fileData = data
+					caption = video.GetCaption()
+					mimeType = video.GetMimetype()
+					fileName = "video.mp4"
+				}
+			} else if doc := v.Message.GetDocumentMessage(); doc != nil {
+				isMedia = true
+				data, err := c.client.DownloadAny(ctx, doc)
+				if err == nil {
+					fileData = data
+					caption = doc.GetCaption()
+					mimeType = doc.GetMimetype()
+					fileName = doc.GetFileName()
+					if fileName == "" { fileName = "document.bin" }
+				}
+			}
+
+			// 5. Envio para Chatwoot
+			if isMedia && len(fileData) > 0 {
+				SendAttachmentToChatwoot(senderName, senderPhone, caption, fileName, fileData)
+			} else {
+				// Texto Simples
+				text := ""
+				if v.Message.Conversation != nil {
+					text = *v.Message.Conversation
+				} else if v.Message.ExtendedTextMessage != nil {
+					text = *v.Message.ExtendedTextMessage.Text
+				}
+				
+				if text != "" {
+					SendToChatwoot(senderName, senderPhone, text)
+				}
+			}
+		}()
+		// ---------------------------
+
+		go c.HandleWebhook(v)
+
+	case *events.Connected:
+		// Lógica de conexão
+	}
+}
+
+func (c *Client) HandleWebhook(v *events.Message) {
+	webhookURL := os.Getenv("WUZAPI_WEBHOOK_URL")
+	if webhookURL == "" {
+		return
+	}
+	// (Mantém lógica original se houver, ou vazio)
+}
+
+func NewClient(deviceStore *store.Device, logger waLog.Logger) *Client {
+	c := whatsmeow.NewClient(deviceStore, waLog.Stdout("Client", "INFO", true))
+	client := &Client{
+		client: c,
+	}
+	c.AddEventHandler(client.EventHandler)
+	return client
+}

@@ -49,7 +49,6 @@ const configFile = "chatwoot.json"
 
 func init() {
 	loadConfig()
-	// Ignora erro de certificado SSL para downloads de mídia
 	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 }
 
@@ -68,7 +67,8 @@ func loadConfig() {
 		json.NewDecoder(file).Decode(&cwCfg)
 		return
 	}
-
+    
+    // Fallback para variáveis de ambiente
 	cwCfg.URL = strings.TrimSpace(os.Getenv("CHATWOOT_URL"))
 	cwCfg.Token = strings.TrimSpace(os.Getenv("CHATWOOT_TOKEN"))
 	cwCfg.AccountID = strings.TrimSpace(os.Getenv("CHATWOOT_ACCOUNT_ID"))
@@ -152,7 +152,7 @@ func sendJsonError(w http.ResponseWriter, msg string, code int) {
 	json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
-// --- API HANDLERS ---
+// --- API HANDLERS (Configuração) ---
 
 func (s *server) HandleSetChatwootConfig() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -184,7 +184,7 @@ func (s *server) HandleGetChatwootConfig() http.HandlerFunc {
 	}
 }
 
-// --- AUTO CRIAÇÃO ---
+// --- AUTO CRIAÇÃO DE CAIXA ---
 func (s *server) HandleAutoCreateInbox() http.HandlerFunc {
 	type Wrapper struct {
 		Config       ChatwootConfig `json:"config"`
@@ -388,7 +388,7 @@ func SendAttachmentToChatwoot(pushName, senderUser, caption, fileName string, fi
 	}
 }
 
-// --- WEBHOOK: CHATWOOT -> WHATSAPP ---
+// --- WEBHOOK: CHATWOOT -> WHATSAPP (Agente respondendo) ---
 
 func (s *server) HandleChatwootWebhook() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -404,6 +404,8 @@ func (s *server) HandleChatwootWebhook() http.HandlerFunc {
 			return
 		}
 
+		// Apenas processa mensagens criadas que são OUTGOING (do Agente)
+		// Mensagens incoming já foram tratadas pelo client.go
 		if payload.Event != "message_created" || payload.MessageType != "outgoing" {
 			w.WriteHeader(http.StatusOK)
 			return
@@ -428,11 +430,14 @@ func (s *server) HandleChatwootWebhook() http.HandlerFunc {
 				return
 			}
 			userID := vals.Get("Id")
+			// Chama a função global do client.go (ou main.go)
+			// Assume que clientManager é acessível globalmente
 			client := clientManager.GetWhatsmeowClient(userID)
 			if client == nil || !client.IsConnected() {
 				return
 			}
 
+			// Recupera telefone
 			phone := payload.Conversation.Contact.PhoneNumber
 			if phone == "" {
 				phone = payload.Conversation.ContactInbox.SourceID
@@ -443,6 +448,7 @@ func (s *server) HandleChatwootWebhook() http.HandlerFunc {
 				return
 			}
 			
+			// Parse seguro
 			jid, err := types.ParseJID(phone)
 			if err != nil {
 				jid, err = types.ParseJID(phone + "@s.whatsapp.net")
@@ -452,11 +458,13 @@ func (s *server) HandleChatwootWebhook() http.HandlerFunc {
 				}
 			}
 
+			// 1. Envio de Mídia
 			if len(payload.Attachments) > 0 {
 				for _, att := range payload.Attachments {
 					sendChatwootMedia(client, jid, att)
 				}
 			} else {
+				// 2. Envio de Texto
 				finalMessage := payload.Content
 				if cfg.SignMessages && payload.Sender.Name != "" {
 					delimiter := strings.ReplaceAll(cfg.SignatureDelimiter, `\n`, "\n")
